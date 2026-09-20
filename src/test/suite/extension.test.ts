@@ -195,6 +195,46 @@ suite('parseItems - tags and dates', () => {
 	});
 });
 
+suite('parseItems - @issue kind', () => {
+	test('Zero: a checkbox line with no @issue tag keeps kind task and no issueId', () => {
+		const items = parseItems('☐ Buy milk');
+		assert.strictEqual(items[0].kind, 'task');
+		assert.ok(!Object.prototype.hasOwnProperty.call(items[0], 'issueId'));
+	});
+
+	test('One: a bare @issue tag parses into kind issue with issueId unset', () => {
+		assert.deepStrictEqual(parseItems('☐ @issue Fix sound issue and merge crusher'), [
+			{ kind: 'issue', name: 'Fix sound issue and merge crusher', children: [] },
+		]);
+	});
+
+	test('One: an @issueN tag parses into kind issue with the number in issueId', () => {
+		assert.deepStrictEqual(parseItems('☐ @issue1 Create a Rushcremental title/logo'), [
+			{ kind: 'issue', name: 'Create a Rushcremental title/logo', issueId: 1, children: [] },
+		]);
+	});
+
+	test('Many: an issue Item still carries status, tags, and completedDate like a task', () => {
+		assert.deepStrictEqual(parseItems('✔ @issue42 @hp2 Ship the feature @done(20260920 09:00)'), [
+			{
+				kind: 'issue',
+				name: 'Ship the feature',
+				status: 'done',
+				tags: ['hp2'],
+				completedDate: '20260920 09:00',
+				issueId: 42,
+				children: [],
+			},
+		]);
+	});
+
+	test('Boundaries: a header line never becomes kind issue, even with an @issue tag in its title', () => {
+		assert.deepStrictEqual(parseItems('# Backlog @issue3:'), [
+			{ kind: 'section', name: 'Backlog', tags: ['issue3'], children: [] },
+		]);
+	});
+});
+
 suite('readItems - Exercise exceptions', () => {
 	let fixtureDir: string | undefined;
 

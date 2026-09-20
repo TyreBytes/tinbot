@@ -7,14 +7,24 @@ parsed structure.
 ## Language
 
 **Item**:
-A node parsed from one line of `task_list.todo`. An Item is either a
-section or a task, nested by indentation under its parent Item.
+A node parsed from one line of `task_list.todo`. An Item is a section, a
+task, or an Issue, nested by indentation under its parent Item.
 _Avoid_: Section, Task (as a tree-node name), Node, Entry
 
 **kind**:
-The field on an Item that says whether it came from a header line
-(`section`) or a checkbox line (`task`).
+The field that says what an Item is: a header line (`section`), a plain
+checkbox line (`task`), or a checkbox line tagged `@issue` (`issue`).
 _Avoid_: type, category
+
+**Issue**:
+A task Item whose line carries an `@issue` tag, meant to sync to a
+GitHub repository. Its `kind` is `'issue'`, and it keeps every task field.
+_Avoid_: ticket, GitHub task
+
+**issueId**:
+The GitHub issue number on an Issue Item, taken from an `@issueN` tag.
+Left unset until the task is synced and gains a number.
+_Avoid_: issueNumber, ticketId
 
 **marker**:
 The leading character or characters that show an Item's kind. `☐`, `✔`,

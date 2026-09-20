@@ -1,13 +1,14 @@
 import * as vscode from 'vscode';
 
 export interface Item {
-	kind: 'section' | 'task';
+	kind: 'section' | 'task' | 'issue';
 	name: string;
 	status?: 'done' | 'cancelled';
 	description?: string;
 	tags?: string[];
 	completedDate?: string;
 	cancelledDate?: string;
+	issueId?: number;
 	children: Item[];
 }
 
@@ -15,6 +16,7 @@ const sectionHeaderPattern = /^#+\s*(.+):$/;
 const taskMarkerPattern = /^[☐✔✘]\s*/;
 const doneTagPattern = /@done\(([^)]+)\)/;
 const cancelledTagPattern = /@cancelled\(([^)]+)\)/;
+const issueTagPattern = /@issue(\d+)?(?![\w-])/;
 const genericTagPattern = /@\w[\w-]*/g;
 
 function countLeadingTabs(line: string): number {
@@ -48,6 +50,17 @@ function applyTags(item: Item, rawName: string): void {
 	if (cancelledMatch) {
 		item.cancelledDate = cancelledMatch[1];
 		name = name.replace(cancelledTagPattern, '');
+	}
+
+	if (item.kind === 'task') {
+		const issueMatch = name.match(issueTagPattern);
+		if (issueMatch) {
+			item.kind = 'issue';
+			if (issueMatch[1] !== undefined) {
+				item.issueId = Number(issueMatch[1]);
+			}
+			name = name.replace(issueTagPattern, '');
+		}
 	}
 
 	const tags: string[] = [];

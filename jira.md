@@ -232,6 +232,52 @@ How to perform this task:
 
 ---
 
+## TINBOT-106
+
+Title: Recognize @issue Tags As A Third Item Kind
+
+Epic: TODO+ Hierarchical Sync
+
+Description:
+Some task lines in `task_list.todo` also carry an `@issue` tag, for
+example `☐ @issue Fix sound issue and merge crusher`. This tag marks a
+task the team plans to sync to a GitHub repository as an issue. Once
+synced, the tag gains a number, for example `@issue1` for GitHub issue 1.
+
+This story adds `'issue'` as a third `kind` value, alongside `'section'`
+and `'task'`. A checkbox line with an `@issue` or `@issueN` tag gets
+`kind: 'issue'` instead of `kind: 'task'`. It keeps every other task
+field: `status`, `description`, `tags`, `completedDate`, `cancelledDate`,
+and `children`.
+
+A new `issueId` field holds the GitHub issue number once synced.
+`@issue1` sets `issueId: 1`. A bare `@issue` tag, with no number yet,
+leaves `issueId` unset.
+
+Acceptance criteria:
+- The `Item` interface's `kind` field gains a third value: `'section' | 'task' | 'issue'`.
+- The `Item` interface gains an optional field `issueId?: number`.
+- A checkbox line with an `@issue` or `@issueN` tag parses into an Item with `kind: 'issue'`, not `kind: 'task'`.
+- An `@issueN` tag sets `issueId` to the number `N`, and is removed from `name`.
+- A bare `@issue` tag, with no digits after it, is removed from `name` and leaves `issueId` unset.
+- A checkbox line with no `@issue` tag keeps `kind: 'task'`, and `issueId` unset.
+- An issue Item still gets `status`, `description`, `tags`, `completedDate`, and `cancelledDate` the same way a task Item does.
+- A header line never becomes `kind: 'issue'`, not even one whose text contains `@issue`.
+- A new unit test must show that `☐ @issue Fix sound issue and merge crusher` parses into `kind: 'issue'` with `issueId` unset.
+- A new unit test must show that `☐ @issue1 Create a Rushcremental title/logo` parses into `kind: 'issue'` with `issueId: 1`.
+
+How to perform this task:
+1. Open `src/extension.ts` and widen the `Item` interface's `kind` field to `'section' | 'task' | 'issue'`, and add `issueId?: number`.
+2. Write a regular expression that matches an `@issue` tag with an optional trailing number, for example `/@issue(\d+)?(?![\w-])/`.
+3. In `applyTags()`, run this pattern on the raw name before the generic `@tag` pattern runs.
+4. When the pattern matches with a number, set `issueId` to that number, parsed with `Number(...)`.
+5. Remove the matched `@issue` token from `name`, whether or not it carried a number.
+6. Only run this check for a checkbox line, never for a header line's title.
+7. When the tag matched, set the Item's `kind` to `'issue'` before you push it onto its parent's `children` array.
+8. Add test cases to `src/test/suite/extension.test.ts` for a bare `@issue` tag, an `@issueN` tag, and a task with neither.
+
+---
+
 ## Story List
 
 | Ticket     | Description                                                          | Epic                     |
@@ -241,3 +287,4 @@ How to perform this task:
 | TINBOT-103 | Extract @tags and completion dates from Item text                      | TODO+ Hierarchical Sync |
 | TINBOT-104 | Write the full Item tree into `tasks.json`, and retire the flat parser | TODO+ Hierarchical Sync |
 | TINBOT-105 | Add test coverage for the hierarchical parser                          | TODO+ Hierarchical Sync |
+| TINBOT-106 | Recognize @issue tags as a third Item kind                             | TODO+ Hierarchical Sync |
