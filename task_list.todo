@@ -40,6 +40,9 @@
 
 		If both changed; it doesn't matter who wins; this is too minimal to worry about
 	☐ The issue created on github is not pulling the description into the todo file.
+	☐ The issue needs to sync completed or not completed.
+		Is the todo list the source of truth, or github? (easiest, least friction for now).
+
 
 	## Alpha Stage:
 		November 14th - Finish Alpha Dev Stage, Feature Complete (20 days)

@@ -4,10 +4,12 @@ import {
 	buildStagingForest,
 	createGithubIssue,
 	getIssueParent,
+	GithubIssue,
 	listOpenIssues,
 	patchIssueLine,
 	ProjectSettings,
 	readProjectSettings,
+	updateGithubIssueTitle,
 } from './github';
 
 export interface Item {
@@ -219,6 +221,40 @@ export function collectKnownIssueIds(items: Item[]): Set<number> {
 	return ids;
 }
 
+export interface IssueTitleMismatch {
+	item: Item;
+	issueNumber: number;
+}
+
+/** For an issue known on both sides, the todo file's name wins over the GitHub title. */
+export function collectMismatchedIssueTitles(items: Item[], openIssues: GithubIssue[]): IssueTitleMismatch[] {
+	const itemsById = new Map<number, Item>();
+	const walk = (list: Item[]) => {
+		for (const item of list) {
+			if (item.kind === 'issue' && item.issueId !== undefined) {
+				itemsById.set(item.issueId, item);
+			}
+			walk(item.children);
+		}
+	};
+	walk(items);
+
+	const mismatches: IssueTitleMismatch[] = [];
+	for (const issue of openIssues) {
+		const item = itemsById.get(issue.number);
+		if (item !== undefined && item.name !== issue.title) {
+			mismatches.push({ item, issueNumber: issue.number });
+		}
+	}
+	return mismatches;
+}
+
+async function pushMismatchedIssueTitles(mismatches: IssueTitleMismatch[], settings: ProjectSettings): Promise<void> {
+	for (const mismatch of mismatches) {
+		await updateGithubIssueTitle(settings, mismatch.issueNumber, mismatch.item.name);
+	}
+}
+
 async function pushUnsyncedIssuesToGithub(baseUri: vscode.Uri, items: Item[], settings: ProjectSettings): Promise<void> {
 	const fileUri = vscode.Uri.joinPath(baseUri, 'task_list.todo');
 	for (const item of collectUnsyncedIssues(items)) {
@@ -238,9 +274,8 @@ async function pushUnsyncedIssuesToGithub(baseUri: vscode.Uri, items: Item[], se
 	}
 }
 
-async function pullNewIssuesFromGithub(baseUri: vscode.Uri, items: Item[], settings: ProjectSettings): Promise<void> {
+async function pullNewIssuesFromGithub(baseUri: vscode.Uri, items: Item[], openIssues: GithubIssue[], settings: ProjectSettings): Promise<void> {
 	const knownIds = collectKnownIssueIds(items);
-	const openIssues = await listOpenIssues(settings);
 	const newIssues = openIssues.filter((issue) => !knownIds.has(issue.number)).sort((a, b) => a.number - b.number);
 	if (newIssues.length === 0) {
 		return;
@@ -270,7 +305,10 @@ async function syncWithGithub(baseUri: vscode.Uri, items: Item[]): Promise<void>
 	}
 
 	await pushUnsyncedIssuesToGithub(baseUri, items, settings);
-	await pullNewIssuesFromGithub(baseUri, items, settings);
+
+	const openIssues = await listOpenIssues(settings);
+	await pushMismatchedIssueTitles(collectMismatchedIssueTitles(items, openIssues), settings);
+	await pullNewIssuesFromGithub(baseUri, items, openIssues, settings);
 }
 
 let baseUriOverride: vscode.Uri | undefined;

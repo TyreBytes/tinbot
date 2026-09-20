@@ -76,6 +76,20 @@ export async function createGithubIssue(settings: ProjectSettings, title: string
 	return result.number;
 }
 
+export async function updateGithubIssueTitle(settings: ProjectSettings, issueNumber: number, title: string): Promise<void> {
+	const { token, owner, repo } = settings.github;
+	const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`, {
+		method: 'PATCH',
+		headers: { ...githubHeaders(token), 'Content-Type': 'application/json' },
+		body: JSON.stringify({ title }),
+	});
+
+	if (!response.ok) {
+		const responseText = await response.text();
+		throw new Error(`GitHub API returned ${response.status} ${response.statusText}: ${responseText}`);
+	}
+}
+
 export interface GithubIssue {
 	number: number;
 	title: string;

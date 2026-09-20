@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import {
 	__setTestBaseUri,
 	collectKnownIssueIds,
+	collectMismatchedIssueTitles,
 	collectUnsyncedIssues,
 	getItemSourceLine,
 	parseItems,
@@ -318,6 +319,51 @@ suite('collectKnownIssueIds - Zero/One/Many/Boundaries', () => {
 	test('Boundaries: an unsynced @issue tag with no number is not included', () => {
 		const items = parseItems('☐ @issue Not synced yet');
 		assert.deepStrictEqual(collectKnownIssueIds(items), new Set());
+	});
+});
+
+suite('collectMismatchedIssueTitles - Zero/One/Many/Boundaries', () => {
+	test('Zero: no open issues returns no mismatches', () => {
+		const items = parseItems('☐ @issue5 Fix the build');
+		assert.deepStrictEqual(collectMismatchedIssueTitles(items, []), []);
+	});
+
+	test('Zero: a matching title returns no mismatch', () => {
+		const items = parseItems('☐ @issue5 Fix the build');
+		const openIssues = [{ number: 5, title: 'Fix the build' }];
+		assert.deepStrictEqual(collectMismatchedIssueTitles(items, openIssues), []);
+	});
+
+	test('One: a differing title returns one mismatch naming the todo file name', () => {
+		const items = parseItems('☐ @issue5 Fix the build');
+		const openIssues = [{ number: 5, title: 'Old title on GitHub' }];
+		assert.deepStrictEqual(collectMismatchedIssueTitles(items, openIssues), [
+			{ item: items[0], issueNumber: 5 },
+		]);
+	});
+
+	test('Many: several differing titles are all returned, in openIssues order', () => {
+		const items = parseItems('☐ @issue4 Parent issue\n☐ @issue6 Child issue');
+		const openIssues = [
+			{ number: 4, title: 'Old parent title' },
+			{ number: 6, title: 'Old child title' },
+		];
+		assert.deepStrictEqual(
+			collectMismatchedIssueTitles(items, openIssues).map((mismatch) => mismatch.issueNumber),
+			[4, 6],
+		);
+	});
+
+	test('Boundaries: an unsynced issue with no issueId is skipped', () => {
+		const items = parseItems('☐ @issue Fix the build');
+		const openIssues = [{ number: 5, title: 'Fix the build (renamed)' }];
+		assert.deepStrictEqual(collectMismatchedIssueTitles(items, openIssues), []);
+	});
+
+	test('Boundaries: an open issue not present in the todo file is skipped', () => {
+		const items = parseItems('☐ @issue5 Fix the build');
+		const openIssues = [{ number: 9, title: 'Not in todo file' }];
+		assert.deepStrictEqual(collectMismatchedIssueTitles(items, openIssues), []);
 	});
 });
 
