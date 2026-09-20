@@ -201,9 +201,8 @@ export function parseItems(text: string): Item[] {
 	return root.children;
 }
 
-export async function readItems(baseUri: vscode.Uri): Promise<Item[]> {
-	const fileUri = vscode.Uri.joinPath(baseUri, 'task_list.todo');
-	const bytes = await vscode.workspace.fs.readFile(fileUri);
+export async function readItems(todoUri: vscode.Uri): Promise<Item[]> {
+	const bytes = await vscode.workspace.fs.readFile(todoUri);
 	const text = new TextDecoder('utf-8').decode(bytes);
 	return parseItems(text);
 }
@@ -299,7 +298,7 @@ export function collectKnownIssueMatches(items: Item[], issues: GithubIssue[]): 
 	return matches;
 }
 
-async function reconcileKnownIssues(baseUri: vscode.Uri, items: Item[], issues: GithubIssue[], settings: ProjectSettings, now: Date): Promise<void> {
+async function reconcileKnownIssues(todoUri: vscode.Uri, items: Item[], issues: GithubIssue[], settings: ProjectSettings, now: Date): Promise<void> {
 	const pending = collectKnownIssueMatches(items, issues)
 		.map((match) => ({ match, direction: decideSyncDirection(match.item, match.issue) }))
 		.filter((entry) => entry.direction !== 'none')
@@ -309,8 +308,7 @@ async function reconcileKnownIssues(baseUri: vscode.Uri, items: Item[], issues: 
 		return;
 	}
 
-	const fileUri = vscode.Uri.joinPath(baseUri, 'task_list.todo');
-	let text = new TextDecoder('utf-8').decode(await vscode.workspace.fs.readFile(fileUri));
+	let text = new TextDecoder('utf-8').decode(await vscode.workspace.fs.readFile(todoUri));
 	const syncedAt = formatSyncedStamp(now);
 
 	for (const entry of pending) {
@@ -334,11 +332,10 @@ async function reconcileKnownIssues(baseUri: vscode.Uri, items: Item[], issues: 
 		text = applyStampOnly(text, lineNumber, syncedAt);
 	}
 
-	await vscode.workspace.fs.writeFile(fileUri, new TextEncoder().encode(text));
+	await vscode.workspace.fs.writeFile(todoUri, new TextEncoder().encode(text));
 }
 
-async function pushUnsyncedIssuesToGithub(baseUri: vscode.Uri, items: Item[], settings: ProjectSettings, now: Date): Promise<void> {
-	const fileUri = vscode.Uri.joinPath(baseUri, 'task_list.todo');
+async function pushUnsyncedIssuesToGithub(todoUri: vscode.Uri, items: Item[], settings: ProjectSettings, now: Date): Promise<void> {
 	for (const item of collectUnsyncedIssues(items)) {
 		const lineNumber = getItemSourceLine(item);
 		if (lineNumber === undefined) {
@@ -347,17 +344,17 @@ async function pushUnsyncedIssuesToGithub(baseUri: vscode.Uri, items: Item[], se
 
 		const issueId = await createGithubIssue(settings, item.name, item.description ?? '');
 
-		const bytes = await vscode.workspace.fs.readFile(fileUri);
+		const bytes = await vscode.workspace.fs.readFile(todoUri);
 		const text = new TextDecoder('utf-8').decode(bytes);
 		const patched = applyStampOnly(patchIssueLine(text, lineNumber, issueId), lineNumber, formatSyncedStamp(now));
-		await vscode.workspace.fs.writeFile(fileUri, new TextEncoder().encode(patched));
+		await vscode.workspace.fs.writeFile(todoUri, new TextEncoder().encode(patched));
 
 		item.issueId = issueId;
 	}
 }
 
 async function pullNewIssuesFromGithub(
-	baseUri: vscode.Uri,
+	todoUri: vscode.Uri,
 	items: Item[],
 	openIssues: GithubIssue[],
 	settings: ProjectSettings,
@@ -379,27 +376,26 @@ async function pullNewIssuesFromGithub(
 
 	const forest = buildStagingForest(newIssues, parentOf);
 
-	const fileUri = vscode.Uri.joinPath(baseUri, 'task_list.todo');
-	const bytes = await vscode.workspace.fs.readFile(fileUri);
+	const bytes = await vscode.workspace.fs.readFile(todoUri);
 	const text = new TextDecoder('utf-8').decode(bytes);
 	const patched = addIssuesToStaging(text, forest, formatSyncedStamp(now));
-	await vscode.workspace.fs.writeFile(fileUri, new TextEncoder().encode(patched));
+	await vscode.workspace.fs.writeFile(todoUri, new TextEncoder().encode(patched));
 }
 
-async function syncWithGithub(baseUri: vscode.Uri, items: Item[]): Promise<void> {
-	const settings = await readProjectSettings(baseUri);
+async function syncWithGithub(todoUri: vscode.Uri, items: Item[]): Promise<void> {
+	const settings = await readProjectSettings(vscode.Uri.joinPath(todoUri, '..'));
 	if (settings === undefined) {
 		return;
 	}
 
 	const now = new Date();
-	await pushUnsyncedIssuesToGithub(baseUri, items, settings, now);
+	await pushUnsyncedIssuesToGithub(todoUri, items, settings, now);
 
 	const allIssues = await listAllIssues(settings);
-	await reconcileKnownIssues(baseUri, items, allIssues, settings, now);
+	await reconcileKnownIssues(todoUri, items, allIssues, settings, now);
 
 	const openIssues = allIssues.filter((issue) => issue.state === 'open');
-	await pullNewIssuesFromGithub(baseUri, items, openIssues, settings, now);
+	await pullNewIssuesFromGithub(todoUri, items, openIssues, settings, now);
 }
 
 const syncedTagWithLeadingSpacePattern = /\s?@synced\([^)]*\)/g;
@@ -423,6 +419,27 @@ function isTodoDocument(document: vscode.TextDocument): boolean {
 	return document.uri.fsPath.endsWith('.todo');
 }
 
+/** Shared by the manual command and the save-triggered sync: reads the given .todo file,
+ * writes its parsed tasks.json alongside it, then reconciles it against GitHub. */
+async function runTodoSync(todoUri: vscode.Uri): Promise<void> {
+	let items: Item[];
+	try {
+		items = await readItems(todoUri);
+		const outputUri = vscode.Uri.joinPath(todoUri, '..', 'tasks.json');
+		const json = JSON.stringify(items, null, 2);
+		await vscode.workspace.fs.writeFile(outputUri, new TextEncoder().encode(json));
+	} catch (err) {
+		vscode.window.showErrorMessage(`tinbot: could not sync tasks: ${err}`);
+		return;
+	}
+
+	try {
+		await syncWithGithub(todoUri, items);
+	} catch (err) {
+		vscode.window.showErrorMessage(`tinbot: could not sync issues to GitHub: ${err}`);
+	}
+}
+
 let baseUriOverride: vscode.Uri | undefined;
 
 /** Test-only seam: lets tests point the command at a fixture dir instead of the real extension path. */
@@ -431,23 +448,26 @@ export function __setTestBaseUri(uri: vscode.Uri | undefined): void {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-	const syncedDecorationType = vscode.window.createTextEditorDecorationType({ opacity: '0.35' });
+	const dimSyncedDecorationType = vscode.window.createTextEditorDecorationType({ opacity: '0.35' });
+	const hiddenSyncedDecorationType = vscode.window.createTextEditorDecorationType({ opacity: '0' });
 
 	const updateSyncedDecorations = (editor: vscode.TextEditor | undefined): void => {
 		if (editor === undefined || !isTodoDocument(editor.document)) {
 			return;
 		}
 		const dimEnabled = vscode.workspace.getConfiguration('tinbot').get<boolean>('colors.syncTag', true);
-		const ranges = dimEnabled
-			? findSyncedTagRanges(editor.document.getText()).map(({ line, start, end }) => new vscode.Range(line, start, line, end))
-			: [];
-		editor.setDecorations(syncedDecorationType, ranges);
+		const ranges = findSyncedTagRanges(editor.document.getText()).map(
+			({ line, start, end }) => new vscode.Range(line, start, line, end),
+		);
+		editor.setDecorations(dimEnabled ? dimSyncedDecorationType : hiddenSyncedDecorationType, ranges);
+		editor.setDecorations(dimEnabled ? hiddenSyncedDecorationType : dimSyncedDecorationType, []);
 	};
 
 	updateSyncedDecorations(vscode.window.activeTextEditor);
 
 	context.subscriptions.push(
-		syncedDecorationType,
+		dimSyncedDecorationType,
+		hiddenSyncedDecorationType,
 		vscode.window.onDidChangeActiveTextEditor(updateSyncedDecorations),
 		vscode.workspace.onDidChangeTextDocument((event) => {
 			const editor = vscode.window.visibleTextEditors.find((candidate) => candidate.document === event.document);
@@ -458,26 +478,16 @@ export function activate(context: vscode.ExtensionContext) {
 				updateSyncedDecorations(vscode.window.activeTextEditor);
 			}
 		}),
+		vscode.workspace.onDidSaveTextDocument((document) => {
+			if (isTodoDocument(document)) {
+				void runTodoSync(document.uri);
+			}
+		}),
 	);
 
 	const disposable = vscode.commands.registerCommand('tinbot.todoSyncGithub', async () => {
 		const baseUri = baseUriOverride ?? context.extensionUri;
-		let items: Item[];
-		try {
-			items = await readItems(baseUri);
-			const outputUri = vscode.Uri.joinPath(baseUri, 'tasks.json');
-			const json = JSON.stringify(items, null, 2);
-			await vscode.workspace.fs.writeFile(outputUri, new TextEncoder().encode(json));
-		} catch (err) {
-			vscode.window.showErrorMessage(`tinbot: could not sync tasks: ${err}`);
-			return;
-		}
-
-		try {
-			await syncWithGithub(baseUri, items);
-		} catch (err) {
-			vscode.window.showErrorMessage(`tinbot: could not sync issues to GitHub: ${err}`);
-		}
+		await runTodoSync(vscode.Uri.joinPath(baseUri, 'task_list.todo'));
 	});
 
 	context.subscriptions.push(disposable);

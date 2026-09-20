@@ -1,13 +1,13 @@
 # Issue Staging:
-	✘ @issue3 Buy Spaghetti @cancelled(20260920 14:15) @synced(20260920 14:15)
+	✘ @issue3 Buy Spaghetti @cancelled(20260920 14:15) @synced(20260920 14:22)
 		You need food to survive.
 
 		This is +10 sustenance.
 
 		Canceled: we are going to buy pizza instead.
-	☐ @issue4 Make the final Alpha Build @synced(20260920 14:02)
+	✔ @issue4 Make the final Alpha Build @done(20260920 14:28) @synced(20260920 14:31)
 		This needs to happen someday.
-		☐ @issue6 Fix the build on Windows @synced(20260920 14:02)
+		✔ @issue6 Fix the build on Windows @done(20260920 14:28) @synced(20260920 14:31)
 	☐ @issue5 Fix the build on Linux/GCC @synced(20260920 14:02)
 	☐ @issue7 If a name/task is does not match, it needs to be updated... @synced(20260920 14:02)
 		Is the todo list the source of truth, or github? (easiest, least friction for now).
@@ -41,8 +41,8 @@
 		break the ability to run this extension on multiple machines.
 
 		If both changed; it doesn't matter who wins; this is too minimal to worry about
-	☐ The issue created on github is not pulling the description into the todo file.
-	☐ The issue needs to sync completed or not completed.
+	✔ The issue created on github is not pulling the description into the todo file. @done(20260920 14:20)
+	✔ The issue needs to sync status: completed, cancelled, todo. @done(20260920 14:20)
 		Is the todo list the source of truth, or github? (easiest, least friction for now).
 	☐ Need to be able to automatically run the TodoSyncGithub when the user saves a .todo file.
 	☐ I need to learn how I would install my own custom vscode extension that we just built.

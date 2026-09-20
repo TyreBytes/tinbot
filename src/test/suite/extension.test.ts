@@ -14,7 +14,7 @@ import {
 	readItems,
 } from '../../extension';
 import { formatSyncedStamp, GithubIssue } from '../../github';
-import { cleanupTaskListFixture, createTaskListFixture } from '../testUtils';
+import { cleanupTaskListFixture, createTaskListFixture, waitForFile } from '../testUtils';
 
 function makeIssue(number: number, title: string, extra: Partial<GithubIssue> = {}): GithubIssue {
 	return { number, title, state: 'open', updatedAt: '2026-09-20T09:00:00.000Z', ...extra };
@@ -495,7 +495,7 @@ suite('readItems - Exercise exceptions', () => {
 	test('rejects when task_list.todo does not exist', async () => {
 		const { uri, dir } = await createTaskListFixture(undefined);
 		fixtureDir = dir;
-		await assert.rejects(readItems(uri), (err: any) => err.code === 'FileNotFound');
+		await assert.rejects(readItems(vscode.Uri.joinPath(uri, 'task_list.todo')), (err: any) => err.code === 'FileNotFound');
 	});
 });
 
@@ -510,7 +510,7 @@ suite('tinbot.todoSyncGithub command - Interface', () => {
 		const extension = vscode.extensions.all.find((e) => e.packageJSON.name === 'tinbot');
 		assert.ok(extension, 'tinbot extension not found');
 
-		const expected = await readItems(extension!.extensionUri);
+		const expected = await readItems(vscode.Uri.joinPath(extension!.extensionUri, 'task_list.todo'));
 		const outputUri = vscode.Uri.joinPath(extension!.extensionUri, 'tasks.json');
 
 		try {
@@ -556,5 +556,34 @@ suite('tinbot.todoSyncGithub command - Exercise exceptions', () => {
 		await vscode.commands.executeCommand('tinbot.todoSyncGithub');
 		assert.ok(captured);
 		assert.ok(captured!.includes('could not sync tasks'));
+	});
+});
+
+suite('.todo save auto-sync - Interface', () => {
+	let fixtureDir: string | undefined;
+
+	teardown(async () => {
+		await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+		await cleanupTaskListFixture(fixtureDir!);
+	});
+
+	test('saving any .todo file writes tasks.json alongside it, without running the command', async function () {
+		this.timeout(10000);
+		const { uri, dir } = await createTaskListFixture('☐ Buy milk');
+		fixtureDir = dir;
+		const todoUri = vscode.Uri.joinPath(uri, 'task_list.todo');
+		const outputUri = vscode.Uri.joinPath(uri, 'tasks.json');
+
+		const document = await vscode.workspace.openTextDocument(todoUri);
+		const editor = await vscode.window.showTextDocument(document);
+		await editor.edit((editBuilder) => {
+			editBuilder.insert(new vscode.Position(0, document.lineAt(0).text.length), '\n☐ Another task');
+		});
+		await document.save();
+
+		await waitForFile(outputUri, 5000);
+		const bytes = await vscode.workspace.fs.readFile(outputUri);
+		const actual = JSON.parse(new TextDecoder('utf-8').decode(bytes));
+		assert.deepStrictEqual(actual, parseItems('☐ Buy milk\n☐ Another task'));
 	});
 });
