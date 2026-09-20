@@ -42,6 +42,8 @@
 	☐ The issue created on github is not pulling the description into the todo file.
 	☐ The issue needs to sync completed or not completed.
 		Is the todo list the source of truth, or github? (easiest, least friction for now).
+	☐ Need to be able to automatically run the TodoSyncGithub when the user saves a .todo file.
+	☐ I need to learn how I would install my own custom vscode extension that we just built.
 
 
 	## Alpha Stage:
