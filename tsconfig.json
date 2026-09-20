@@ -6,7 +6,9 @@
 		"outDir": "out",
 		"rootDir": "src",
 		"sourceMap": true,
-		"strict": true
+		"strict": true,
+		"esModuleInterop": true,
+		"types": ["node", "mocha"]
 	},
 	"exclude": ["node_modules", ".vscode-test"]
 }
