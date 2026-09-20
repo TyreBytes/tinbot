@@ -1,11 +1,35 @@
 {
   "name": "tinbot",
+  "displayName": "tinbot",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "engines": {
+    "vscode": "^1.138.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "tinbot.helloWorld",
+        "title": "Hello World"
+      }
+    ]
+  },
   "scripts": {
-    "start": "node index.js"
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
   },
   "author": "Tim Beaudet",
-  "license": "ISC"
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "@types/vscode": "^1.138.0",
+    "@vscode/vsce": "^4.0.0",
+    "typescript": "^7.0.2"
+  }
 }
