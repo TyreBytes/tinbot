@@ -117,6 +117,8 @@ suite('tinbot.helloWorld command - Interface', () => {
 		try {
 			await vscode.commands.executeCommand('tinbot.helloWorld');
 			assert.strictEqual(captured, expected);
+		} catch (err) {
+			assert.fail(`tinbot.helloWorld command threw: ${err}`);
 		} finally {
 			(vscode.window as any).showInformationMessage = original;
 		}
