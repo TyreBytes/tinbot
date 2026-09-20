@@ -24,9 +24,12 @@ Epic: TODO+ Hierarchical Sync
 Description:
 `task_list.todo` mixes two kinds of marked lines. A header line starts
 with one or more `#` characters and ends with a colon, for example
-`# Tin Bot Project:`. A checkbox line starts with `☐` or `✔` or `✘`, for
-example `☐ Buy milk`. This story builds one `Item` type for all kinds,
-with a `kind` field set to `section` or `task`.
+`# Tin Bot Project:`. A checkbox line starts with `☐`, `✔`, or `✘`, for
+example `☐ Buy milk`. Each checkbox character also sets a status: `☐`
+marks an open task, `✔` marks a done task, and `✘` marks a cancelled
+task. This story builds one `Item` type for all kinds, with a `kind`
+field set to `section` or `task`. A new `status` field keeps this meaning
+for a task.
 
 Depth decides nesting, not the marker. Depth comes only from the count of
 leading tab characters on a line. For example, `## Alpha Stage:` and `#
@@ -36,22 +39,26 @@ treat this as an error.
 
 Acceptance criteria:
 - A header line, one or more `#` characters ending in a colon, parses into an Item with `kind: 'section'`.
-- A checkbox line, starting with `☐`, `✘` or `✔`, parses into an Item with `kind: 'task'`.
+- A checkbox line, starting with `☐`, `✔`, or `✘`, parses into an Item with `kind: 'task'`.
+- The `Item` interface gains an optional field `status: 'done' | 'cancelled'`, left unset for an open task and for every section.
+- A task parsed from a `✔` line has `status: 'done'`.
+- A task parsed from a `✘` line has `status: 'cancelled'`.
 - Every Item's `name` field holds the line text, with its marker, its trailing colon (for a section), and outer whitespace removed.
 - An Item's Depth comes only from its leading tab count. The `#` count on a section line has no effect on Depth.
 - An Item with a Depth one tab deeper than the Item above it becomes a child of that Item, not a sibling.
 - The flat lines at the top of `task_list.todo`, with no header above them, become top-level Items with no shared parent.
-- A new unit test must show correct parsing of a section, a task, a task with children, and a section that holds tasks.
+- A new unit test must show correct parsing of an open task, a done task, a cancelled task, and a section that holds tasks.
 
 How to perform this task:
-1. Open `src/extension.ts` and add an `Item` interface with fields `kind: 'section' | 'task'`, `name: string`, and `children: Item[]`.
+1. Open `src/extension.ts` and add an `Item` interface with fields `kind: 'section' | 'task'`, `name: string`, `status?: 'done' | 'cancelled'`, and `children: Item[]`.
 2. Add a `parseItems(text: string): Item[]` function, separate from the existing `parseTasks()` function.
 3. Count the leading tab characters on each line to find its Depth.
 4. Match a line against `/^#+\s*(.+):$/` before you look for a `☐`/`✔`/`✘` marker, so header lines parse as sections first.
-5. Build the tree with a depth stack. Push a new Item onto the children array of the stack item one level shallower.
-6. When a line's Depth is the same as or shallower than the stack top, pop the stack back to the matching Depth first.
-7. Add a `readItems(baseUri: vscode.Uri): Promise<Item[]>` function that reads `task_list.todo` and calls `parseItems()`.
-8. Add test cases to `src/test/suite/extension.test.ts`, in the style of the existing Zero/One/Many/Boundaries suites.
+5. When a checkbox line starts with `✔`, set `status` to `'done'`. When it starts with `✘`, set `status` to `'cancelled'`. Leave `status` unset for `☐`.
+6. Build the tree with a depth stack. Push a new Item onto the children array of the stack item one level shallower.
+7. When a line's Depth is the same as or shallower than the stack top, pop the stack back to the matching Depth first.
+8. Add a `readItems(baseUri: vscode.Uri): Promise<Item[]>` function that reads `task_list.todo` and calls `parseItems()`.
+9. Add test cases to `src/test/suite/extension.test.ts`, in the style of the existing Zero/One/Many/Boundaries suites.
 
 ---
 
@@ -63,7 +70,7 @@ Epic: TODO+ Hierarchical Sync
 
 Description:
 Some Items in `task_list.todo` have plain text among their children, with
-no `☐`, `✔`, or `#` marker. This text can sit before an Item's first
+no `☐`, `✔`, `✘`, or `#` marker. This text can sit before an Item's first
 child, between two children, or after its last child. This story adds a
 `description` field to `Item`. The parser must collect every one of these
 plain-text blocks, not just the first.
@@ -114,29 +121,37 @@ example `25-11-05 20:01` and `20251025 06:55`. This story stores the raw
 text of the token, with the parentheses stripped, in a `completedDate`
 field. It does not convert either format to a common one.
 
+A `✘` task can also carry an `@cancelled(...)` token, with the same date
+and time format as `@done(...)`. This story stores its raw text, with the
+parentheses stripped, in a `cancelledDate` field, in the same way as
+`completedDate`.
+
 Every other `@tag` token, with or without an attached word, must parse
 into a `tags` array of strings. Because `kind` no longer separates
 sections from tasks in a special way, this extraction runs on every Item,
 section or task alike.
 
 Acceptance criteria:
-- The `Item` interface gains optional fields `completedDate?: string` and `tags?: string[]`.
+- The `Item` interface gains optional fields `completedDate?: string`, `cancelledDate?: string`, and `tags?: string[]`.
 - An `@done(...)` token is removed from `name`. Its content is stored in `completedDate`, with the parentheses stripped and the text otherwise unchanged.
+- An `@cancelled(...)` token is removed from `name`. Its content is stored in `cancelledDate`, with the parentheses stripped and the text otherwise unchanged.
 - Every other `@tag` token is removed from `name` and added to `tags`, in the order it appears in the line.
-- An Item with no `@tag` token keeps `tags` as `undefined` and `completedDate` as `undefined`.
+- An Item with no `@tag` token keeps `tags`, `completedDate`, and `cancelledDate` as `undefined`.
 - The remaining `name`, after tag removal, has no double space left where a tag used to sit.
 - Tag extraction runs the same way for an Item with `kind: 'section'` as for one with `kind: 'task'`.
 - A new unit test must show that a line with `@hp2 @value5` parses into `tags: ['hp2', 'value5']` and a clean `name`.
 - A new unit test must show that `@done(25-11-05 20:01)` and `@done(20251025 06:55)` both store as-is in `completedDate`, unconverted.
+- A new unit test must show that `@cancelled(20260920 09:34)` stores as-is in `cancelledDate`, unconverted.
 
 How to perform this task:
-1. Open `src/extension.ts` and add `completedDate?: string` and `tags?: string[]` to the `Item` interface.
+1. Open `src/extension.ts` and add `completedDate?: string`, `cancelledDate?: string`, and `tags?: string[]` to the `Item` interface.
 2. Write a regular expression that matches `@done\(([^)]+)\)`, and store the captured text in `completedDate`.
-3. Write a regular expression that matches remaining `@\w[\w-]*` tokens, and collect each match into `tags`.
-4. Run this extraction on every Item's `name`, after the marker strip from TINBOT-101, regardless of `kind`.
-5. Remove every matched token from `name`.
-6. Collapse repeated spaces left by the removal into a single space.
-7. Add test cases to `src/test/suite/extension.test.ts` for `@done(...)` alone, other tags alone, both together, and no tags at all.
+3. Write a regular expression that matches `@cancelled\(([^)]+)\)`, and store the captured text in `cancelledDate`.
+4. Write a regular expression that matches remaining `@\w[\w-]*` tokens, and collect each match into `tags`.
+5. Run this extraction on every Item's `name`, after the marker strip from TINBOT-101, regardless of `kind`.
+6. Remove every matched token from `name`.
+7. Collapse repeated spaces left by the removal into a single space.
+8. Add test cases to `src/test/suite/extension.test.ts` for `@done(...)` alone, `@cancelled(...)` alone, other tags alone, all together, and no tags at all.
 
 ---
 
@@ -161,8 +176,9 @@ and `readItems()`. This story must then delete `parseTasks()`,
 Acceptance criteria:
 - The `tinbot.todoSyncGithub` command calls `readItems()` and writes its result to `tasks.json`, in place of `readTasks()`.
 - `tasks.json` keeps its name and its location, next to `task_list.todo` in the same base directory.
-- When the source line carries that data, each Item object in `tasks.json` includes `description`, `tags`, and `completedDate`.
+- When the source line carries that data, each Item object in `tasks.json` includes `status`, `description`, `tags`, `completedDate`, and `cancelledDate`.
 - When the source line carries no such data, `tasks.json` omits that field, instead of writing `null`.
+- A section Item in `tasks.json` keeps `kind: 'section'` and its `children` array. A reader can then tell which entries are sections, and what sits under each one.
 - The command still catches a read error, and shows the existing error message, `tinbot: could not sync tasks: ${err}`, unchanged.
 - The write step still uses `vscode.workspace.fs.writeFile` and `JSON.stringify(..., null, 2)`, so the file stays readable.
 - `src/extension.ts` no longer exports `parseTasks()`, `readTasks()`, or the flat `Task` interface, once this story is done.
@@ -200,8 +216,10 @@ Acceptance criteria:
 - Every new `try` block inside a test carries a matching `catch` block that calls `assert.fail()` with a clear message.
 - New suites follow the existing Zero/One/Many/Boundaries naming pattern in `src/test/suite/extension.test.ts`.
 - A test must show that `parseItems()`, from TINBOT-101, builds correct Depth-based nesting for a section, a task, and mixed children.
+- A test must show that an open task, a done task, and a cancelled task, from TINBOT-101, get the correct `status` value.
 - A test must show that an Item's `description`, from TINBOT-102, holds every block in file order. The Item must have blocks before, between, and after its children.
-- A test must show that an Item's `tags` and `completedDate`, from TINBOT-103, hold correct values for both `@done` date formats found in `task_list.todo`.
+- A test must show correct `tags`, `completedDate`, and `cancelledDate` values, from TINBOT-103, for both `@done` date formats found in `task_list.todo`.
+- A test must show the same correct values, from TINBOT-103, for the `@cancelled` format found in `task_list.todo`.
 - The interface test for `tinbot.todoSyncGithub` must show that `tasks.json` matches the full Item tree from `readItems()`, from TINBOT-104.
 
 How to perform this task:

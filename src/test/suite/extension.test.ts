@@ -1,67 +1,201 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { __setTestBaseUri, parseTasks, readTasks } from '../../extension';
+import { __setTestBaseUri, parseItems, readItems } from '../../extension';
 import { cleanupTaskListFixture, createTaskListFixture } from '../testUtils';
 
-suite('parseTasks - Zero/One/Many/Boundaries', () => {
-	test('Zero: empty text resolves to no tasks', () => {
-		assert.deepStrictEqual(parseTasks(''), []);
+suite('parseItems - Zero/One/Many/Boundaries', () => {
+	test('Zero: empty text resolves to no items', () => {
+		assert.deepStrictEqual(parseItems(''), []);
 	});
 
-	test('Zero: whitespace-only text resolves to no tasks', () => {
-		assert.deepStrictEqual(parseTasks('\n   \n\t\n\n'), []);
-	});
-
-	test('One: single unchecked task line returns one pending task', () => {
-		assert.deepStrictEqual(parseTasks('☐ Buy milk'), [{ name: 'Buy milk', done: false }]);
-	});
-
-	test('One: single checked task line returns one done task', () => {
-		assert.deepStrictEqual(parseTasks('✔ Buy milk'), [{ name: 'Buy milk', done: true }]);
-	});
-
-	test('Many: multiple lines with blanks interspersed returns every task in order', () => {
-		const text = '\n☐ First task\n\n✔ Second task done\n☐ Third task\n';
-		assert.deepStrictEqual(parseTasks(text), [
-			{ name: 'First task', done: false },
-			{ name: 'Second task done', done: true },
-			{ name: 'Third task', done: false },
+	test('One: a single section line parses into one section Item', () => {
+		assert.deepStrictEqual(parseItems('# Tin Bot Project:'), [
+			{ kind: 'section', name: 'Tin Bot Project', children: [] },
 		]);
 	});
 
-	test('Boundaries: leading blank lines before the task lines are skipped', () => {
-		assert.deepStrictEqual(parseTasks('\n\n\n☐ Do the thing'), [{ name: 'Do the thing', done: false }]);
+	test('One: a single open task line parses into one task Item with no status', () => {
+		assert.deepStrictEqual(parseItems('☐ Buy milk'), [{ kind: 'task', name: 'Buy milk', children: [] }]);
 	});
 
-	test('Boundaries: trailing whitespace and tabs on a task line are trimmed', () => {
-		assert.deepStrictEqual(parseTasks('☐ Do the thing   \t\t'), [{ name: 'Do the thing', done: false }]);
+	test('Many: top-level lines with blanks interspersed become siblings with no shared parent', () => {
+		const text = '☐ First task\n\n☐ Second task\n# A Header:\n☐ Third task';
+		const items = parseItems(text);
+		assert.deepStrictEqual(
+			items.map((item) => item.name),
+			['First task', 'Second task', 'A Header', 'Third task'],
+		);
+	});
+
+	test('Boundaries: a task indented under a section becomes a child of that section', () => {
+		const text = '# Race Weekend:\n\t☐ Race Result Screen';
+		assert.deepStrictEqual(parseItems(text), [
+			{
+				kind: 'section',
+				name: 'Race Weekend',
+				children: [{ kind: 'task', name: 'Race Result Screen', children: [] }],
+			},
+		]);
+	});
+
+	test('Boundaries: a task indented under a task becomes a child of that task', () => {
+		const text = '☐ Race Result Screen\n\t☐ sub task of race results screen.\n\t✔ car icons';
+		assert.deepStrictEqual(parseItems(text), [
+			{
+				kind: 'task',
+				name: 'Race Result Screen',
+				children: [
+					{ kind: 'task', name: 'sub task of race results screen.', children: [] },
+					{ kind: 'task', name: 'car icons', status: 'done', children: [] },
+				],
+			},
+		]);
+	});
+
+	test('Boundaries: the # count on a header does not change its Depth relative to indentation', () => {
+		const text = '# Tin Bot Project:\n\t## Alpha Stage:\n\t# Pain Points of TurtleBrains:';
+		const items = parseItems(text);
+		assert.deepStrictEqual(
+			items[0].children.map((child) => child.name),
+			['Alpha Stage', 'Pain Points of TurtleBrains'],
+		);
+	});
+
+	test('Boundaries: a done marker (✔) line parses into a task Item with status done', () => {
+		assert.deepStrictEqual(parseItems('✔ Sign NDA'), [
+			{ kind: 'task', name: 'Sign NDA', status: 'done', children: [] },
+		]);
+	});
+
+	test('Boundaries: a cancelled marker (✘) line parses into a task Item with status cancelled', () => {
+		assert.deepStrictEqual(parseItems('✘ Dropped feature'), [
+			{ kind: 'task', name: 'Dropped feature', status: 'cancelled', children: [] },
+		]);
+	});
+
+	test('Boundaries: an open marker (☐) line parses into a task Item with no status field', () => {
+		const items = parseItems('☐ Open task');
+		assert.deepStrictEqual(items, [{ kind: 'task', name: 'Open task', children: [] }]);
+		assert.ok(!Object.prototype.hasOwnProperty.call(items[0], 'status'));
+	});
+
+	test('Boundaries: a section never carries a status field', () => {
+		const items = parseItems('# A Header:');
+		assert.ok(!Object.prototype.hasOwnProperty.call(items[0], 'status'));
 	});
 
 	test('Boundaries: a checkbox marker with no text after it is excluded', () => {
-		assert.deepStrictEqual(parseTasks('☐'), []);
+		assert.deepStrictEqual(parseItems('☐'), []);
 	});
 
-	test('Boundaries: a checkbox marker followed only by spaces is excluded', () => {
-		assert.deepStrictEqual(parseTasks('☐   '), []);
-	});
-
-	test('Boundaries: a line with no checkbox prefix is included as-is, trimmed', () => {
-		assert.deepStrictEqual(parseTasks('  Just plain text, no marker  '), [
-			{ name: 'Just plain text, no marker', done: false },
+	test('Boundaries: a plain text line with no marker produces no Item of its own', () => {
+		assert.deepStrictEqual(parseItems('☐ Get milk\n\tThis is a description line.'), [
+			{ kind: 'task', name: 'Get milk', description: 'This is a description line.', children: [] },
 		]);
-	});
-
-	test('Boundaries: CRLF line endings leave no stray \\r in any task name', () => {
-		const tasks = parseTasks('☐ Task with CRLF\r\n\r\n☐ Second\r\n');
-		assert.deepStrictEqual(tasks, [
-			{ name: 'Task with CRLF', done: false },
-			{ name: 'Second', done: false },
-		]);
-		assert.ok(tasks.every((task) => !task.name.includes('\r')));
 	});
 });
 
-suite('readTasks - Exercise exceptions', () => {
+suite('parseItems - description blocks', () => {
+	test('Zero: a task with no plain-text children has no description field', () => {
+		const items = parseItems('☐ Buy milk');
+		assert.ok(!Object.prototype.hasOwnProperty.call(items[0], 'description'));
+	});
+
+	test('One: a single plain-text line under a task becomes its description', () => {
+		const text = '☐ Get milk\n\tOne line of notes.';
+		assert.deepStrictEqual(parseItems(text), [
+			{ kind: 'task', name: 'Get milk', description: 'One line of notes.', children: [] },
+		]);
+	});
+
+	test('Many: a blank line inside one run of plain text stays inside a single description block', () => {
+		const text = '☐ Get milk\n\tFirst line.\n\n\tSecond line.';
+		assert.deepStrictEqual(parseItems(text), [
+			{ kind: 'task', name: 'Get milk', description: 'First line.\n\nSecond line.', children: [] },
+		]);
+	});
+
+	test('Boundaries: description text before, between, and after marked children joins into one description, in file order', () => {
+		const text =
+			'☐ Race Result Screen\n' +
+			'\tBefore text.\n' +
+			'\t☐ sub task one\n' +
+			'\tBetween text.\n' +
+			'\t☐ sub task two\n' +
+			'\tAfter text.';
+		assert.deepStrictEqual(parseItems(text), [
+			{
+				kind: 'task',
+				name: 'Race Result Screen',
+				description: 'Before text.\n\nBetween text.\n\nAfter text.',
+				children: [
+					{ kind: 'task', name: 'sub task one', children: [] },
+					{ kind: 'task', name: 'sub task two', children: [] },
+				],
+			},
+		]);
+	});
+
+	test('Boundaries: leading and trailing blank lines around a description block are trimmed', () => {
+		const text = '☐ Get milk\n\n\tPadded line.\n\n';
+		assert.deepStrictEqual(parseItems(text), [
+			{ kind: 'task', name: 'Get milk', description: 'Padded line.', children: [] },
+		]);
+	});
+});
+
+suite('parseItems - tags and dates', () => {
+	test('Zero: a line with no @tag token has no tags, completedDate, or cancelledDate fields', () => {
+		const items = parseItems('☐ Buy milk');
+		assert.ok(!Object.prototype.hasOwnProperty.call(items[0], 'tags'));
+		assert.ok(!Object.prototype.hasOwnProperty.call(items[0], 'completedDate'));
+		assert.ok(!Object.prototype.hasOwnProperty.call(items[0], 'cancelledDate'));
+	});
+
+	test('One: an @done(...) token is removed from name and stored in completedDate', () => {
+		assert.deepStrictEqual(parseItems('✔ Sign NDA @done(25-11-05 20:01)'), [
+			{ kind: 'task', name: 'Sign NDA', status: 'done', completedDate: '25-11-05 20:01', children: [] },
+		]);
+	});
+
+	test('One: an @cancelled(...) token is removed from name and stored in cancelledDate', () => {
+		assert.deepStrictEqual(parseItems('✘ Dropped feature @cancelled(20260920 09:34)'), [
+			{ kind: 'task', name: 'Dropped feature', status: 'cancelled', cancelledDate: '20260920 09:34', children: [] },
+		]);
+	});
+
+	test('Many: several plain @tag tokens are removed from name and collected into tags, in order', () => {
+		assert.deepStrictEqual(parseItems('✔ @hp2 @value5 SetRotation() @done(20251025 08:31)'), [
+			{
+				kind: 'task',
+				name: 'SetRotation()',
+				status: 'done',
+				tags: ['hp2', 'value5'],
+				completedDate: '20251025 08:31',
+				children: [],
+			},
+		]);
+	});
+
+	test('Boundaries: an @api-break tag with a hyphen parses as one tag', () => {
+		assert.deepStrictEqual(parseItems('☐ Fix this @api-break'), [
+			{ kind: 'task', name: 'Fix this', tags: ['api-break'], children: [] },
+		]);
+	});
+
+	test('Boundaries: tag removal leaves no double space where a tag used to sit', () => {
+		const items = parseItems('☐ Word @hp2 word');
+		assert.strictEqual(items[0].name, 'Word word');
+	});
+
+	test('Boundaries: a section line runs through the same tag extraction as a task line', () => {
+		assert.deepStrictEqual(parseItems('# Race Weekend @hp2:'), [
+			{ kind: 'section', name: 'Race Weekend', tags: ['hp2'], children: [] },
+		]);
+	});
+});
+
+suite('readItems - Exercise exceptions', () => {
 	let fixtureDir: string | undefined;
 
 	teardown(async () => {
@@ -71,18 +205,18 @@ suite('readTasks - Exercise exceptions', () => {
 	test('rejects when task_list.todo does not exist', async () => {
 		const { uri, dir } = await createTaskListFixture(undefined);
 		fixtureDir = dir;
-		await assert.rejects(readTasks(uri), (err: any) => err.code === 'FileNotFound');
+		await assert.rejects(readItems(uri), (err: any) => err.code === 'FileNotFound');
 	});
 });
 
 suite('tinbot.todoSyncGithub command - Interface', () => {
 	// Simple scenario / Interface contract test: exercises real command registration
-	// -> readTasks -> tasks.json write, against the real bundled task_list.todo.
+	// -> readItems -> tasks.json write, against the real bundled task_list.todo.
 	test('todoSyncGithub command writes tasks.json next to the real task_list.todo', async () => {
 		const extension = vscode.extensions.all.find((e) => e.packageJSON.name === 'tinbot');
 		assert.ok(extension, 'tinbot extension not found');
 
-		const expected = await readTasks(extension!.extensionUri);
+		const expected = await readItems(extension!.extensionUri);
 		const outputUri = vscode.Uri.joinPath(extension!.extensionUri, 'tasks.json');
 
 		try {

@@ -17,9 +17,15 @@ The field on an Item that says whether it came from a header line
 _Avoid_: type, category
 
 **marker**:
-The leading character or characters that show an Item's kind. `☐` or `✔`
-for a task, or one or more `#` characters for a section.
+The leading character or characters that show an Item's kind. `☐`, `✔`,
+or `✘` for a task, or one or more `#` characters for a section.
 _Avoid_: symbol, prefix
+
+**status**:
+The field on a task Item that records whether it is done or cancelled,
+set by which checkbox character started its line. Left unset for an open
+(`☐`) task, and never set on a section.
+_Avoid_: done, complete, state
 
 **Depth**:
 The nesting level of an Item, set only by the count of leading tab
@@ -37,6 +43,11 @@ _Avoid_: notes, body text
 The raw text inside an Item's `@done(...)` token, stored exactly as
 written, with no date format conversion.
 _Avoid_: doneDate, finishedAt
+
+**cancelledDate**:
+The raw text inside an Item's `@cancelled(...)` token, stored exactly as
+written, with no date format conversion.
+_Avoid_: cancelDate, droppedAt
 
 **tags**:
 The list of `@word` tokens on an Item's line, other than `@done(...)`, in
