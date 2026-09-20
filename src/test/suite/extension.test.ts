@@ -551,9 +551,19 @@ suite('readItems - Exercise exceptions', () => {
 });
 
 suite('tinbot.todoSyncGithub command - Interface', () => {
+	let originalShowErrorMessage: typeof vscode.window.showErrorMessage;
+
+	teardown(() => {
+		(vscode.window as any).showErrorMessage = originalShowErrorMessage;
+	});
+
 	// Simple scenario / Interface contract test: exercises real command registration
-	// -> readItems -> tasks.json write, against the real bundled task_list.todo.
-	test('todoSyncGithub command writes tasks.json next to the real task_list.todo', async function () {
+	// -> readItems -> tasks.json write -> live GitHub sync, against the real bundled
+	// task_list.todo. The command reports a sync failure via showErrorMessage rather than
+	// rejecting, so that call is captured here too: without it, a broken live sync (e.g. an
+	// exception thrown while reconciling any known issue) would leave tasks.json correctly
+	// written from the earlier, unrelated step and this test would pass regardless.
+	test('todoSyncGithub command writes tasks.json next to the real task_list.todo, with no sync error reported', async function () {
 		// A real project_settings.secret makes this call out to the live GitHub API
 		// (push, then list, then a parent lookup per new issue), well past mocha's default 2s.
 		this.timeout(20000);
@@ -563,6 +573,13 @@ suite('tinbot.todoSyncGithub command - Interface', () => {
 
 		const expected = await readItems(vscode.Uri.joinPath(extension!.extensionUri, 'task_list.todo'));
 		const outputUri = vscode.Uri.joinPath(extension!.extensionUri, 'tasks.json');
+
+		originalShowErrorMessage = vscode.window.showErrorMessage;
+		let capturedError: string | undefined;
+		(vscode.window as any).showErrorMessage = (message: string) => {
+			capturedError = message;
+			return Promise.resolve(undefined);
+		};
 
 		try {
 			await vscode.commands.executeCommand('tinbot.todoSyncGithub');
@@ -574,6 +591,8 @@ suite('tinbot.todoSyncGithub command - Interface', () => {
 		} finally {
 			await vscode.workspace.fs.delete(outputUri, { useTrash: false });
 		}
+
+		assert.strictEqual(capturedError, undefined, `tinbot reported a sync error: ${capturedError}`);
 	});
 
 	test('tinbot.todoSyncGithub is registered and discoverable via getCommands', async () => {

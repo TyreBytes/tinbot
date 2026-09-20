@@ -46,12 +46,12 @@
 		Is the todo list the source of truth, or github? (easiest, least friction for now).
 	✔ @issue9 Need to be able to automatically run the TodoSyncGithub when the user saves a .todo file. @synced(20260920 14:50) @done(20260920 14:50)
 	☐ @issue11 I need to learn how I would install my own custom vscode extension that we just built. @synced(20260920 14:56)
-		☐ @issue12 the color is not working yet. @synced(20260920 15:20)
+		✔ @issue12 the color is not working yet. @done(20260920 15:41:34) @synced(20260920 15:41:35)
 
 	☐ @issue13 Need to get some food. @synced(20260920 15:10)
 		☐ @issue14 Going to order some pizza @synced(20260920 15:10)
-		☐ @issue15 @started @lasted we could have spaghetti (20260920 15:23) @synced(20260920 15:23)
-	✔ @issue16 need tomato sauce @done(20260920 15:23) @synced(20260920 15:23)
+		☐ @issue15 @started @lasted we could have spaghetti (20260920 15:23) @synced(20260920 15:35:07)
+	✔ @issue16 need tomato sauce @done(20260920 15:23:09) @synced(20260920 15:35:07)
 
 	## Alpha Stage:
 		November 14th - Finish Alpha Dev Stage, Feature Complete (20 days)

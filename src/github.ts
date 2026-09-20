@@ -228,21 +228,30 @@ export function todoStatusToGithubPatch(status: TodoStatus): { state: 'open' | '
 	return { state: 'closed', state_reason: status === 'cancelled' ? 'not_planned' : 'completed' };
 }
 
-const syncedStampFormatPattern = /^(\d{4})(\d{2})(\d{2}) (\d{2}):(\d{2})$/;
+// The :SS group is optional so a stamp written by an older version of tinbot (before seconds
+// were added) still parses, rather than breaking every issue that already has one.
+const syncedStampFormatPattern = /^(\d{4})(\d{2})(\d{2}) (\d{2}):(\d{2})(?::(\d{2}))?$/;
 
-/** The extension's own bookkeeping format for @synced(...): YYYYMMDD HH:MM, always in local time. */
+/**
+ * The extension's own bookkeeping format for @synced(...): YYYYMMDD HH:MM:SS, always in local
+ * time. Seconds matter here: this stamp is compared against GitHub's own updated_at, and a
+ * push's resulting GitHub timestamp always lands a little after the moment this is stamped
+ * from. Minute precision left up to 59 seconds of slack in which that same-minute GitHub
+ * timestamp would look "newer" than the stamp, wrongly triggering a pull that could discard
+ * an edit made moments later in that window; seconds narrow that gap to under one second.
+ */
 export function formatSyncedStamp(date: Date): string {
 	const pad = (value: number) => String(value).padStart(2, '0');
-	return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+	return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 export function parseSyncedStamp(text: string): Date {
 	const match = text.match(syncedStampFormatPattern);
 	if (match === null) {
-		throw new Error(`parseSyncedStamp: "${text}" is not in the expected YYYYMMDD HH:MM format`);
+		throw new Error(`parseSyncedStamp: "${text}" is not in the expected YYYYMMDD HH:MM[:SS] format`);
 	}
-	const [, year, month, day, hour, minute] = match;
-	return new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
+	const [, year, month, day, hour, minute, second] = match;
+	return new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second ?? '0'));
 }
 
 export function splitTextLines(text: string): { eol: string; lines: string[] } {
