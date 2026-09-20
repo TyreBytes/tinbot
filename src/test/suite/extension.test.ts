@@ -110,10 +110,7 @@ suite('tinbot.todoSyncGithub command - Exercise exceptions', () => {
 	teardown(async () => {
 		__setTestBaseUri(undefined);
 		(vscode.window as any).showErrorMessage = originalShowErrorMessage;
-		if (fixtureDir) {
-			await cleanupTaskListFixture(fixtureDir);
-			fixtureDir = undefined;
-		}
+		await cleanupTaskListFixture(fixtureDir!);
 	});
 
 	test('shows an error message when task_list.todo is missing', async () => {
