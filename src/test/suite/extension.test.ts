@@ -88,10 +88,7 @@ suite('readFirstTask - Exercise exceptions', () => {
 	let fixtureDir: string | undefined;
 
 	teardown(async () => {
-		if (fixtureDir) {
-			await cleanupTaskListFixture(fixtureDir);
-			fixtureDir = undefined;
-		}
+		await cleanupTaskListFixture(fixtureDir!);
 	});
 
 	test('rejects when task_list.todo does not exist', async () => {
