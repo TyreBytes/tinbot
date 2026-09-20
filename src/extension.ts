@@ -448,35 +448,26 @@ export function __setTestBaseUri(uri: vscode.Uri | undefined): void {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-	const dimSyncedDecorationType = vscode.window.createTextEditorDecorationType({ opacity: '0.35' });
-	const hiddenSyncedDecorationType = vscode.window.createTextEditorDecorationType({ opacity: '0' });
+	const syncedDecorationType = vscode.window.createTextEditorDecorationType({ opacity: '0.3' });
 
 	const updateSyncedDecorations = (editor: vscode.TextEditor | undefined): void => {
 		if (editor === undefined || !isTodoDocument(editor.document)) {
 			return;
 		}
-		const dimEnabled = vscode.workspace.getConfiguration('tinbot').get<boolean>('colors.syncTag', true);
 		const ranges = findSyncedTagRanges(editor.document.getText()).map(
 			({ line, start, end }) => new vscode.Range(line, start, line, end),
 		);
-		editor.setDecorations(dimEnabled ? dimSyncedDecorationType : hiddenSyncedDecorationType, ranges);
-		editor.setDecorations(dimEnabled ? hiddenSyncedDecorationType : dimSyncedDecorationType, []);
+		editor.setDecorations(syncedDecorationType, ranges);
 	};
 
 	updateSyncedDecorations(vscode.window.activeTextEditor);
 
 	context.subscriptions.push(
-		dimSyncedDecorationType,
-		hiddenSyncedDecorationType,
+		syncedDecorationType,
 		vscode.window.onDidChangeActiveTextEditor(updateSyncedDecorations),
 		vscode.workspace.onDidChangeTextDocument((event) => {
 			const editor = vscode.window.visibleTextEditors.find((candidate) => candidate.document === event.document);
 			updateSyncedDecorations(editor);
-		}),
-		vscode.workspace.onDidChangeConfiguration((event) => {
-			if (event.affectsConfiguration('tinbot.colors.syncTag')) {
-				updateSyncedDecorations(vscode.window.activeTextEditor);
-			}
 		}),
 		vscode.workspace.onDidSaveTextDocument((document) => {
 			if (isTodoDocument(document)) {

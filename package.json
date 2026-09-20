@@ -19,17 +19,7 @@
         "command": "tinbot.todoSyncGithub",
         "title": "TodoSyncGithub"
       }
-    ],
-    "configuration": {
-      "title": "tinbot",
-      "properties": {
-        "tinbot.colors.syncTag": {
-          "type": "boolean",
-          "default": true,
-          "description": "In .todo files, dim the @synced(...) bookkeeping tag when true, or hide it completely when false."
-        }
-      }
-    }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
