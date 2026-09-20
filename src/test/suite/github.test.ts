@@ -22,7 +22,7 @@ import { parseItems } from '../../extension';
 import { cleanupTaskListFixture, createTaskListFixture } from '../testUtils';
 
 function makeIssue(number: number, title: string, extra: Partial<GithubIssue> = {}): GithubIssue {
-	return { number, title, state: 'open', updatedAt: '2026-09-20T09:00:00.000Z', ...extra };
+	return { id: number * 1000, number, title, state: 'open', updatedAt: '2026-09-20T09:00:00.000Z', ...extra };
 }
 
 suite('readProjectSettings - Zero/One/Many/Boundaries', () => {

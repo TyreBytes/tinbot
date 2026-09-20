@@ -94,6 +94,22 @@ export async function addSubIssue(settings: ProjectSettings, parentIssueNumber: 
 	}
 }
 
+/** Unlinks a sub-issue from its current parent, addressed the same way as addSubIssue: the
+ * parent by its issue number in the URL, the child by its internal id in the body. */
+export async function removeSubIssue(settings: ProjectSettings, parentIssueNumber: number, subIssueId: number): Promise<void> {
+	const { token, owner, repo } = settings.github;
+	const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${parentIssueNumber}/sub_issue`, {
+		method: 'DELETE',
+		headers: { ...githubHeaders(token), 'Content-Type': 'application/json' },
+		body: JSON.stringify({ sub_issue_id: subIssueId }),
+	});
+
+	if (!response.ok) {
+		const responseText = await response.text();
+		throw new Error(`GitHub API returned ${response.status} ${response.statusText}: ${responseText}`);
+	}
+}
+
 export interface GithubIssuePatch {
 	title?: string;
 	body?: string;
@@ -116,6 +132,7 @@ export async function updateGithubIssue(settings: ProjectSettings, issueNumber: 
 }
 
 export interface GithubIssue {
+	id: number;
 	number: number;
 	title: string;
 	body?: string;
@@ -123,9 +140,13 @@ export interface GithubIssue {
 	stateReason?: string;
 	updatedAt: string;
 	closedAt?: string;
+	/** The current parent issue's number, if any. Not part of the bulk listing endpoint;
+	 * populated separately (see getIssueParent) by callers that need to reconcile it. */
+	parentNumber?: number;
 }
 
 interface ListIssuesApiEntry {
+	id: number;
 	number: number;
 	title: string;
 	body?: string | null;
@@ -153,6 +174,7 @@ export async function listAllIssues(settings: ProjectSettings): Promise<GithubIs
 		.filter((entry) => entry.pull_request === undefined)
 		.map((entry) => {
 			const issue: GithubIssue = {
+				id: entry.id,
 				number: entry.number,
 				title: entry.title,
 				state: entry.state === 'closed' ? 'closed' : 'open',

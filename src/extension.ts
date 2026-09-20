@@ -15,6 +15,7 @@ import {
 	patchIssueLine,
 	ProjectSettings,
 	readProjectSettings,
+	removeSubIssue,
 	TodoStatus,
 	todoStatusToGithubPatch,
 	updateGithubIssue,
@@ -264,7 +265,9 @@ function itemIssueStatus(item: Item): TodoStatus {
 	return item.status ?? 'open';
 }
 
-/** Whether the todo item and its matching GitHub issue already agree on title, status, and description. */
+/** Whether the todo item and its matching GitHub issue already agree on title, status,
+ * description, and parent issue. issue.parentNumber must already be populated by the caller
+ * (see getIssueParent) for the parent comparison to be meaningful. */
 export function issueMatchesGithub(item: Item, issue: GithubIssue): boolean {
 	if (item.name !== issue.title) {
 		return false;
@@ -272,7 +275,10 @@ export function issueMatchesGithub(item: Item, issue: GithubIssue): boolean {
 	if (itemIssueStatus(item) !== githubStatusToTodoStatus(issue.state, issue.stateReason)) {
 		return false;
 	}
-	return (item.description ?? '') === (issue.body ?? '');
+	if ((item.description ?? '') !== (issue.body ?? '')) {
+		return false;
+	}
+	return getParentIssue(item)?.issueId === issue.parentNumber;
 }
 
 export type SyncDirection = 'baseline' | 'pull' | 'push' | 'none';
@@ -323,8 +329,33 @@ export function collectKnownIssueMatches(items: Item[], issues: GithubIssue[]): 
 	return matches;
 }
 
+/** Pushes the todo file's parent-issue relationship to GitHub when it differs from GitHub's
+ * current one: removing the old sub-issue link first (a sub-issue can only have one parent),
+ * then adding the new one. A no-op when they already agree. Reparenting away from GitHub's
+ * side (e.g. GitHub says a different parent than the todo file, or none at all) is not
+ * handled yet; only the todo file winning a push is. */
+async function pushParentRelationship(settings: ProjectSettings, item: Item, issue: GithubIssue): Promise<void> {
+	const desiredParentNumber = getParentIssue(item)?.issueId;
+	if (desiredParentNumber === issue.parentNumber) {
+		return;
+	}
+	if (issue.parentNumber !== undefined) {
+		await removeSubIssue(settings, issue.parentNumber, issue.id);
+	}
+	if (desiredParentNumber !== undefined) {
+		await addSubIssue(settings, desiredParentNumber, issue.id);
+	}
+}
+
 async function reconcileKnownIssues(todoUri: vscode.Uri, items: Item[], issues: GithubIssue[], settings: ProjectSettings, now: Date): Promise<void> {
-	const pending = collectKnownIssueMatches(items, issues)
+	const matches = await Promise.all(
+		collectKnownIssueMatches(items, issues).map(async (match) => ({
+			item: match.item,
+			issue: { ...match.issue, parentNumber: await getIssueParent(settings, match.issue.number) },
+		})),
+	);
+
+	const pending = matches
 		.map((match) => ({ match, direction: decideSyncDirection(match.item, match.issue) }))
 		.filter((entry) => entry.direction !== 'none')
 		.sort((a, b) => getItemSourceLine(b.match.item)! - getItemSourceLine(a.match.item)!);
@@ -353,6 +384,7 @@ async function reconcileKnownIssues(todoUri: vscode.Uri, items: Item[], issues: 
 				body: item.description ?? '',
 				...todoStatusToGithubPatch(itemIssueStatus(item)),
 			});
+			await pushParentRelationship(settings, item, issue);
 		}
 		text = applyStampOnly(text, lineNumber, syncedAt);
 	}

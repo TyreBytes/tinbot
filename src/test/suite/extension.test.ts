@@ -18,7 +18,7 @@ import { formatSyncedStamp, GithubIssue } from '../../github';
 import { cleanupTaskListFixture, createTaskListFixture, waitForFile } from '../testUtils';
 
 function makeIssue(number: number, title: string, extra: Partial<GithubIssue> = {}): GithubIssue {
-	return { number, title, state: 'open', updatedAt: '2026-09-20T09:00:00.000Z', ...extra };
+	return { id: number * 1000, number, title, state: 'open', updatedAt: '2026-09-20T09:00:00.000Z', ...extra };
 }
 
 function makeIssueItem(overrides: Partial<Item> = {}): Item {
@@ -408,6 +408,20 @@ suite('issueMatchesGithub - Zero/One/Many/Boundaries', () => {
 		const issue = makeIssue(5, 'Fix the build', { body: 'GitHub description.' });
 		assert.strictEqual(issueMatchesGithub(item, issue), false);
 	});
+
+	test('Boundaries: a matching parent issue matches', () => {
+		const items = parseItems('☐ @issue11 Parent issue\n\t☐ @issue12 Child issue');
+		const childItem = items[0].children[0];
+		const issue = makeIssue(12, 'Child issue', { parentNumber: 11 });
+		assert.strictEqual(issueMatchesGithub(childItem, issue), true);
+	});
+
+	test('Boundaries: a differing parent issue does not match', () => {
+		const items = parseItems('☐ @issue11 Parent issue\n\t☐ @issue12 Child issue');
+		const childItem = items[0].children[0];
+		const issue = makeIssue(12, 'Child issue', { parentNumber: 99 });
+		assert.strictEqual(issueMatchesGithub(childItem, issue), false);
+	});
 });
 
 suite('decideSyncDirection - Zero/One/Many/Boundaries', () => {
@@ -449,6 +463,13 @@ suite('decideSyncDirection - Zero/One/Many/Boundaries', () => {
 		const item = makeIssueItem({ name: 'A new todo title', syncedAt: formatSyncedStamp(lastSyncedAt) });
 		const issue = makeIssue(5, 'Fix the build', { updatedAt: lastSyncedAt.toISOString() });
 		assert.notStrictEqual(decideSyncDirection(item, issue), 'pull');
+	});
+
+	test('Boundaries: a parent-only mismatch pushes even when title, status, and description match', () => {
+		const text = `☐ @issue11 Parent issue\n\t☐ @issue12 Child issue @synced(${formatSyncedStamp(lastSyncedAt)})`;
+		const childItem = parseItems(text)[0].children[0];
+		const issue = makeIssue(12, 'Child issue', { updatedAt: lastSyncedAt.toISOString() });
+		assert.strictEqual(decideSyncDirection(childItem, issue), 'push');
 	});
 });
 
