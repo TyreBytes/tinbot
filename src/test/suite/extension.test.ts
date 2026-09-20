@@ -98,10 +98,10 @@ suite('readFirstTask - Exercise exceptions', () => {
 	});
 });
 
-suite('tinbot.helloWorld command - Interface', () => {
+suite('tinbot.todoSyncGithub command - Interface', () => {
 	// Simple scenario / Interface contract test: exercises real command registration
 	// -> readFirstTask -> showInformationMessage wiring against the real bundled task_list.todo.
-	test('helloWorld command shows the first task from task_list.todo', async () => {
+	test('todoSyncGithub command shows the first task from task_list.todo', async () => {
 		const extension = vscode.extensions.all.find((e) => e.packageJSON.name === 'tinbot');
 		assert.ok(extension, 'tinbot extension not found');
 
@@ -115,22 +115,22 @@ suite('tinbot.helloWorld command - Interface', () => {
 		};
 
 		try {
-			await vscode.commands.executeCommand('tinbot.helloWorld');
+			await vscode.commands.executeCommand('tinbot.todoSyncGithub');
 			assert.strictEqual(captured, expected);
 		} catch (err) {
-			assert.fail(`tinbot.helloWorld command threw: ${err}`);
+			assert.fail(`tinbot.todoSyncGithub command threw: ${err}`);
 		} finally {
 			(vscode.window as any).showInformationMessage = original;
 		}
 	});
 
-	test('tinbot.helloWorld is registered and discoverable via getCommands', async () => {
+	test('tinbot.todoSyncGithub is registered and discoverable via getCommands', async () => {
 		const commands = await vscode.commands.getCommands(true);
-		assert.ok(commands.includes('tinbot.helloWorld'));
+		assert.ok(commands.includes('tinbot.todoSyncGithub'));
 	});
 });
 
-suite('tinbot.helloWorld command - Exercise exceptions', () => {
+suite('tinbot.todoSyncGithub command - Exercise exceptions', () => {
 	let fixtureDir: string | undefined;
 	let originalShowErrorMessage: typeof vscode.window.showErrorMessage;
 
@@ -155,7 +155,7 @@ suite('tinbot.helloWorld command - Exercise exceptions', () => {
 			return Promise.resolve(undefined);
 		};
 
-		await vscode.commands.executeCommand('tinbot.helloWorld');
+		await vscode.commands.executeCommand('tinbot.todoSyncGithub');
 		assert.ok(captured);
 		assert.ok(captured!.includes('could not read task_list.todo'));
 	});

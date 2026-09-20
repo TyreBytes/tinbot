@@ -16,7 +16,7 @@ export function __setTestBaseUri(uri: vscode.Uri | undefined): void {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-	const disposable = vscode.commands.registerCommand('tinbot.helloWorld', async () => {
+	const disposable = vscode.commands.registerCommand('tinbot.todoSyncGithub', async () => {
 		try {
 			const message = await readFirstTask(baseUriOverride ?? context.extensionUri);
 			vscode.window.showInformationMessage(message);

@@ -14,8 +14,8 @@
   "contributes": {
     "commands": [
       {
-        "command": "tinbot.helloWorld",
-        "title": "Hello World"
+        "command": "tinbot.todoSyncGithub",
+        "title": "TodoSyncGithub"
       }
     ]
   },
