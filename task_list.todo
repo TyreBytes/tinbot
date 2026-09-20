@@ -17,6 +17,9 @@
 		break the ability to run this extension on multiple machines.
 
 		If both changed; it doesn't matter who wins; this is too minimal to worry about
+	☐ @issue17 This is a little task. @synced(20260920 16:29:58)
+	☐ @issue18 BUY TIM PIZZA @synced(20260920 16:29:58)
+		☐ @issue19 Order the pizza @synced(20260920 16:29:58)
 
 ☐ This is a first todo.
 ☐ This is a new example task to be done.
@@ -56,7 +59,7 @@
 	## Alpha Stage:
 		November 14th - Finish Alpha Dev Stage, Feature Complete (20 days)
 
-		☐ Task specific to Tin Bot Alpha Stage
+		✔ @issue20 Task specific to Tin Bot Alpha Stage @done(20260920 16:30) @synced(20260920 16:30:24)
 		✔ Sign NDA @done(25-11-05 20:01)
 		☐ Race Result Screen
 			☐ sub task of race results screen.

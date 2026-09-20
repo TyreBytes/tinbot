@@ -553,16 +553,22 @@ suite('readItems - Exercise exceptions', () => {
 suite('tinbot.todoSyncGithub command - Interface', () => {
 	let originalShowErrorMessage: typeof vscode.window.showErrorMessage;
 
-	teardown(() => {
+	teardown(async () => {
 		(vscode.window as any).showErrorMessage = originalShowErrorMessage;
+		await vscode.workspace.getConfiguration('tinbot').update('projectsFile', undefined, vscode.ConfigurationTarget.Global);
 	});
 
 	// Simple scenario / Interface contract test: exercises real command registration
 	// -> readItems -> tasks.json write -> live GitHub sync, against the real bundled
-	// task_list.todo. The command reports a sync failure via showErrorMessage rather than
-	// rejecting, so that call is captured here too: without it, a broken live sync (e.g. an
-	// exception thrown while reconciling any known issue) would leave tasks.json correctly
-	// written from the earlier, unrelated step and this test would pass regardless.
+	// task_list.todo. This points tinbot.projectsFile at project_settings.secret (a
+	// maintainer-only, gitignored local fixture, never read directly by the shipped extension
+	// itself, only through this setting), which already holds the map keyed by .todo path that
+	// tinbot.projectsFile expects. When that file is absent, readProjectSettings resolves to
+	// undefined and the live sync step is a graceful no-op, same as an unconfigured setting.
+	// The command also reports a sync failure via showErrorMessage rather than rejecting, so
+	// that call is captured too: without it, a broken live sync (e.g. an exception thrown
+	// while reconciling any known issue) would leave tasks.json correctly written from the
+	// earlier, unrelated step and this test would pass regardless.
 	test('todoSyncGithub command writes tasks.json next to the real task_list.todo, with no sync error reported', async function () {
 		// A real project_settings.secret makes this call out to the live GitHub API
 		// (push, then list, then a parent lookup per new issue), well past mocha's default 2s.
@@ -571,8 +577,12 @@ suite('tinbot.todoSyncGithub command - Interface', () => {
 		const extension = vscode.extensions.all.find((e) => e.packageJSON.name === 'tinbot');
 		assert.ok(extension, 'tinbot extension not found');
 
-		const expected = await readItems(vscode.Uri.joinPath(extension!.extensionUri, 'task_list.todo'));
+		const todoUri = vscode.Uri.joinPath(extension!.extensionUri, 'task_list.todo');
+		const expected = await readItems(todoUri);
 		const outputUri = vscode.Uri.joinPath(extension!.extensionUri, 'tasks.json');
+		const secretUri = vscode.Uri.joinPath(extension!.extensionUri, 'project_settings.secret');
+
+		await vscode.workspace.getConfiguration('tinbot').update('projectsFile', secretUri.fsPath, vscode.ConfigurationTarget.Global);
 
 		originalShowErrorMessage = vscode.window.showErrorMessage;
 		let capturedError: string | undefined;

@@ -1,0 +1,22 @@
+# Issue Staging:
+	☐ @issue5 Fix the build on Linux/GCC @synced(20260920 16:18:36)
+	☐ @issue7 If a name/task is does not match, it needs to be updated... @synced(20260920 16:18:36)
+		Is the todo list the source of truth, or github? (easiest, least friction for now).
+
+		Ideally it would be the one most recently changed; this would require saving/keeping a
+		'last known todo file' around to detect which difference was the change and that would
+		break the ability to run this extension on multiple machines.
+
+		If both changed; it doesn't matter who wins; this is too minimal to worry about
+	☐ @issue10 2026-09-19: TurtleBrains Particle System has no editor. @synced(20260920 16:18:36)
+	☐ @issue11 I need to learn how I would install my own custom vscode extension that we just built. @synced(20260920 16:18:36)
+	☐ @issue13 Need to get some food. @synced(20260920 16:18:36)
+		☐ @issue15 we could have spaghetti (20260920 15:23) @synced(20260920 16:18:36)
+	☐ @issue17 This is a little task. @synced(20260920 16:18:36)
+
+# Some more tasks here:
+
+	☐ @issue14 This is a little task. @synced(20260920 16:18:36)
+	☐ another task
+	☐ @issue18 BUY TIM PIZZA @synced(20260920 16:18:36)
+		☐ @issue19 Order the pizza @synced(20260920 16:18:36)

@@ -28,3 +28,12 @@ export async function createTaskListFixture(content: string | undefined): Promis
 export async function cleanupTaskListFixture(dir: string): Promise<void> {
 	await fs.promises.rm(dir, { recursive: true, force: true });
 }
+
+/** Writes a tinbot.projectsFile-shaped JSON file to a fresh temp directory, for exercising
+ * readProjectSettings without touching the real VS Code settings.json. */
+export async function createProjectsSettingsFixture(projects: Record<string, unknown>): Promise<{ uri: vscode.Uri; dir: string }> {
+	const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'tinbot-settings-'));
+	const filePath = path.join(dir, 'projects.json');
+	await fs.promises.writeFile(filePath, JSON.stringify(projects), 'utf8');
+	return { uri: vscode.Uri.file(filePath), dir };
+}

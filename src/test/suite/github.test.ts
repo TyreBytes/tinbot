@@ -1,6 +1,5 @@
 import * as assert from 'assert';
-import * as fs from 'fs';
-import * as path from 'path';
+import * as vscode from 'vscode';
 import {
 	addIssuesToStaging,
 	applyIssuePull,
@@ -19,63 +18,78 @@ import {
 	todoStatusToGithubPatch,
 } from '../../github';
 import { parseItems } from '../../extension';
-import { cleanupTaskListFixture, createTaskListFixture } from '../testUtils';
+import { cleanupTaskListFixture, createProjectsSettingsFixture } from '../testUtils';
 
 function makeIssue(number: number, title: string, extra: Partial<GithubIssue> = {}): GithubIssue {
 	return { id: number * 1000, number, title, state: 'open', updatedAt: '2026-09-20T09:00:00.000Z', ...extra };
 }
 
 suite('readProjectSettings - Zero/One/Many/Boundaries', () => {
-	let fixtureDir: string | undefined;
+	const todoUri = vscode.Uri.file('/fake/project/task_list.todo');
+	const otherTodoUri = vscode.Uri.file('/fake/other-project/task_list.todo');
+	let settingsDir: string | undefined;
 
 	teardown(async () => {
-		await cleanupTaskListFixture(fixtureDir!);
+		await vscode.workspace.getConfiguration('tinbot').update('projectsFile', undefined, vscode.ConfigurationTarget.Global);
+		await cleanupTaskListFixture(settingsDir!);
 	});
 
-	test('Zero: a missing project_settings.secret resolves to undefined', async () => {
-		const { uri, dir } = await createTaskListFixture(undefined);
-		fixtureDir = dir;
-		assert.strictEqual(await readProjectSettings(uri), undefined);
+	async function useProjects(projects: Record<string, unknown>): Promise<void> {
+		const fixture = await createProjectsSettingsFixture(projects);
+		settingsDir = fixture.dir;
+		await vscode.workspace.getConfiguration('tinbot').update('projectsFile', fixture.uri.fsPath, vscode.ConfigurationTarget.Global);
+	}
+
+	test('Zero: no entry for this file resolves to undefined', async () => {
+		await useProjects({});
+		assert.strictEqual(await readProjectSettings(todoUri), undefined);
 	});
 
-	test('One: a valid file resolves to the parsed settings', async () => {
-		const { uri, dir } = await createTaskListFixture(undefined);
-		fixtureDir = dir;
-		const content = JSON.stringify({ github: { token: 'ghp_abc', owner: 'tyre-bytes', repo: 'tinbot' } });
-		await fs.promises.writeFile(path.join(dir, 'project_settings.secret'), content, 'utf8');
+	test('One: a valid entry resolves to the parsed settings', async () => {
+		await useProjects({ [todoUri.fsPath]: { github: { token: 'ghp_abc', owner: 'tyre-bytes', repo: 'tinbot' } } });
 
-		assert.deepStrictEqual(await readProjectSettings(uri), {
+		assert.deepStrictEqual(await readProjectSettings(todoUri), {
 			github: { token: 'ghp_abc', owner: 'tyre-bytes', repo: 'tinbot' },
 		});
 	});
 
-	test('Boundaries: invalid JSON rejects with a clear message', async () => {
-		const { uri, dir } = await createTaskListFixture(undefined);
-		fixtureDir = dir;
-		await fs.promises.writeFile(path.join(dir, 'project_settings.secret'), '{ not valid json', 'utf8');
+	test('Boundaries: an entry missing github.token rejects naming that field', async () => {
+		await useProjects({ [todoUri.fsPath]: { github: { owner: 'tyre-bytes', repo: 'tinbot' } } });
 
-		await assert.rejects(readProjectSettings(uri), (err: Error) => err.message.includes('not valid JSON'));
+		await assert.rejects(readProjectSettings(todoUri), /github\.token/);
 	});
 
-	test('Boundaries: a file missing github.token rejects naming that field', async () => {
-		const { uri, dir } = await createTaskListFixture(undefined);
-		fixtureDir = dir;
-		const content = JSON.stringify({ github: { owner: 'tyre-bytes', repo: 'tinbot' } });
-		await fs.promises.writeFile(path.join(dir, 'project_settings.secret'), content, 'utf8');
-
-		await assert.rejects(readProjectSettings(uri), (err: Error) => err.message.includes('github.token'));
-	});
-
-	test('Many: a file missing multiple fields rejects naming all of them', async () => {
-		const { uri, dir } = await createTaskListFixture(undefined);
-		fixtureDir = dir;
-		const content = JSON.stringify({ github: { token: 'ghp_abc' } });
-		await fs.promises.writeFile(path.join(dir, 'project_settings.secret'), content, 'utf8');
+	test('Many: an entry missing multiple fields rejects naming all of them', async () => {
+		await useProjects({ [todoUri.fsPath]: { github: { token: 'ghp_abc' } } });
 
 		await assert.rejects(
-			readProjectSettings(uri),
+			readProjectSettings(todoUri),
 			(err: Error) => err.message.includes('github.owner') && err.message.includes('github.repo'),
 		);
+	});
+
+	test('Boundaries: a different .todo file\'s entry does not collide, even with the same base name', async () => {
+		await useProjects({ [otherTodoUri.fsPath]: { github: { token: 'ghp_abc', owner: 'tyre-bytes', repo: 'tinbot' } } });
+
+		assert.strictEqual(await readProjectSettings(todoUri), undefined);
+	});
+});
+
+suite('readProjectSettings - settings file location', () => {
+	teardown(async () => {
+		await vscode.workspace.getConfiguration('tinbot').update('projectsFile', undefined, vscode.ConfigurationTarget.Global);
+	});
+
+	test('Boundaries: an unset tinbot.projectsFile resolves to undefined', async () => {
+		assert.strictEqual(await readProjectSettings(vscode.Uri.file('/fake/project/task_list.todo')), undefined);
+	});
+
+	test('Boundaries: a tinbot.projectsFile pointing at a missing file resolves to undefined', async () => {
+		await vscode.workspace
+			.getConfiguration('tinbot')
+			.update('projectsFile', '/fake/does-not-exist/projects.json', vscode.ConfigurationTarget.Global);
+
+		assert.strictEqual(await readProjectSettings(vscode.Uri.file('/fake/project/task_list.todo')), undefined);
 	});
 });
 

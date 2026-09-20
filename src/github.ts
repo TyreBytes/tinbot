@@ -8,11 +8,20 @@ export interface ProjectSettings {
 	};
 }
 
-export async function readProjectSettings(baseUri: vscode.Uri): Promise<ProjectSettings | undefined> {
-	const fileUri = vscode.Uri.joinPath(baseUri, 'project_settings.secret');
+/** Reads this .todo file's GitHub settings from the JSON file named by the tinbot.projectsFile
+ * setting, keyed by the file's full path. One settings file can hold entries for .todo files in
+ * several different repos, so two identically-named .todo files in different folders never
+ * collide, and the file can be kept outside version control instead of in settings.json. */
+export async function readProjectSettings(todoUri: vscode.Uri): Promise<ProjectSettings | undefined> {
+	const settingsPath = vscode.workspace.getConfiguration('tinbot').get<string>('projectsFile', '');
+	if (settingsPath.length === 0) {
+		return undefined;
+	}
+
+	const settingsUri = vscode.Uri.file(settingsPath);
 	let bytes: Uint8Array;
 	try {
-		bytes = await vscode.workspace.fs.readFile(fileUri);
+		bytes = await vscode.workspace.fs.readFile(settingsUri);
 	} catch (err) {
 		if ((err as { code?: string }).code === 'FileNotFound') {
 			return undefined;
@@ -25,10 +34,15 @@ export async function readProjectSettings(baseUri: vscode.Uri): Promise<ProjectS
 	try {
 		parsed = JSON.parse(text);
 	} catch (err) {
-		throw new Error(`project_settings.secret is not valid JSON: ${err}`);
+		throw new Error(`tinbot.projectsFile ("${settingsPath}") is not valid JSON: ${err}`);
 	}
 
-	const github = (parsed as { github?: Record<string, unknown> } | undefined)?.github ?? {};
+	const entry = (parsed as Record<string, { github?: Record<string, unknown> } | undefined>)[todoUri.fsPath];
+	if (entry === undefined) {
+		return undefined;
+	}
+
+	const github = entry.github ?? {};
 	const missing: string[] = [];
 	if (typeof github.token !== 'string' || github.token.length === 0) {
 		missing.push('github.token');
@@ -40,7 +54,7 @@ export async function readProjectSettings(baseUri: vscode.Uri): Promise<ProjectS
 		missing.push('github.repo');
 	}
 	if (missing.length > 0) {
-		throw new Error(`project_settings.secret is missing required field(s): ${missing.join(', ')}`);
+		throw new Error(`${settingsPath}["${todoUri.fsPath}"] is missing required field(s): ${missing.join(', ')}`);
 	}
 
 	return { github: { token: github.token as string, owner: github.owner as string, repo: github.repo as string } };

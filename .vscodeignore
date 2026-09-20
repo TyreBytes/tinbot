@@ -1,4 +1,17 @@
 .vscode/**
+.vscode-test/**
 src/**
+out/test/**
 .gitignore
+.vscodeignore
 tsconfig.json
+tasks.json
+*.secret
+*.secret.example
+CLAUDE.md
+CONTEXT.md
+jira.md
+.claude/**
+build/**
+distribute/**
+docs/**

@@ -1,8 +1,12 @@
 {
   "name": "tinbot",
   "displayName": "tinbot",
-  "version": "1.0.0",
+  "version": "0.5.0",
   "description": "",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TyreBytes/tinbot.git"
+  },
   "engines": {
     "vscode": "^1.138.0"
   },
@@ -19,7 +23,17 @@
         "command": "tinbot.todoSyncGithub",
         "title": "TodoSyncGithub"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "tinbot",
+      "properties": {
+        "tinbot.projectsFile": {
+          "type": "string",
+          "default": "",
+          "description": "Path to a JSON file with GitHub settings per .todo file, keyed by that file's full path. One file can list entries for .todo files in several different repos, so it can live outside any of those repos and outside settings.json, which keeps GitHub tokens out of Settings Sync. Example content:\n{\n  \"/home/you/project-a/task_list.todo\": { \"github\": { \"token\": \"...\", \"owner\": \"your-org\", \"repo\": \"project-a\" } },\n  \"/home/you/project-b/task_list.todo\": { \"github\": { \"token\": \"...\", \"owner\": \"your-org\", \"repo\": \"project-b\" } }\n}"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

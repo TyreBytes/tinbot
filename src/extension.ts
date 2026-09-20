@@ -445,7 +445,7 @@ async function pullNewIssuesFromGithub(
 }
 
 async function syncWithGithub(todoUri: vscode.Uri, items: Item[]): Promise<void> {
-	const settings = await readProjectSettings(vscode.Uri.joinPath(todoUri, '..'));
+	const settings = await readProjectSettings(todoUri);
 	if (settings === undefined) {
 		return;
 	}
