@@ -8,6 +8,7 @@ import {
 	decideSyncDirection,
 	findSyncedTagRanges,
 	getItemSourceLine,
+	getParentIssue,
 	issueMatchesGithub,
 	Item,
 	parseItems,
@@ -281,6 +282,35 @@ suite('getItemSourceLine - Zero/One/Many/Boundaries', () => {
 	test('Boundaries: a hand-built Item never produced by parseItems has no recorded line', () => {
 		const item = { kind: 'task' as const, name: 'Not parsed', children: [] };
 		assert.strictEqual(getItemSourceLine(item), undefined);
+	});
+});
+
+suite('getParentIssue - Zero/One/Many/Boundaries', () => {
+	test('Zero: a top-level issue has no parent issue', () => {
+		const items = parseItems('☐ @issue11 Parent issue');
+		assert.strictEqual(getParentIssue(items[0]), undefined);
+	});
+
+	test('One: an issue nested directly under another issue has that issue as its parent', () => {
+		const items = parseItems('☐ @issue11 Parent issue\n\t☐ @issue12 Child issue');
+		assert.strictEqual(getParentIssue(items[0].children[0]), items[0]);
+	});
+
+	test('Many: an issue nested under a plain task under an issue still finds the issue', () => {
+		const text = '☐ @issue11 Parent issue\n\t☐ Intermediate task\n\t\t☐ @issue12 Child issue';
+		const items = parseItems(text);
+		const child = items[0].children[0].children[0];
+		assert.strictEqual(getParentIssue(child), items[0]);
+	});
+
+	test('Boundaries: an issue nested under a section (not an issue) has no parent issue', () => {
+		const items = parseItems('# Section:\n\t☐ @issue12 Child issue');
+		assert.strictEqual(getParentIssue(items[0].children[0]), undefined);
+	});
+
+	test('Boundaries: a hand-built Item never produced by parseItems has no recorded parent issue', () => {
+		const item = { kind: 'issue' as const, name: 'Not parsed', children: [] };
+		assert.strictEqual(getParentIssue(item), undefined);
 	});
 });
 

@@ -55,11 +55,12 @@ function githubHeaders(token: string): Record<string, string> {
 	};
 }
 
-interface CreateIssueApiResponse {
+export interface CreatedGithubIssue {
+	id: number;
 	number: number;
 }
 
-export async function createGithubIssue(settings: ProjectSettings, title: string, body: string): Promise<number> {
+export async function createGithubIssue(settings: ProjectSettings, title: string, body: string): Promise<CreatedGithubIssue> {
 	const { token, owner, repo } = settings.github;
 	const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues`, {
 		method: 'POST',
@@ -72,8 +73,25 @@ export async function createGithubIssue(settings: ProjectSettings, title: string
 		throw new Error(`GitHub API returned ${response.status} ${response.statusText}: ${responseText}`);
 	}
 
-	const result = (await response.json()) as CreateIssueApiResponse;
-	return result.number;
+	const result = (await response.json()) as CreatedGithubIssue;
+	return { id: result.id, number: result.number };
+}
+
+/** Links an already-created issue as a sub-issue of a parent issue, using GitHub's sub-issues API.
+ * The parent is addressed by its issue number (as in every other call here); the child must be
+ * addressed by its internal database id, which is GitHub's own requirement for this endpoint. */
+export async function addSubIssue(settings: ProjectSettings, parentIssueNumber: number, subIssueId: number): Promise<void> {
+	const { token, owner, repo } = settings.github;
+	const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${parentIssueNumber}/sub_issues`, {
+		method: 'POST',
+		headers: { ...githubHeaders(token), 'Content-Type': 'application/json' },
+		body: JSON.stringify({ sub_issue_id: subIssueId }),
+	});
+
+	if (!response.ok) {
+		const responseText = await response.text();
+		throw new Error(`GitHub API returned ${response.status} ${response.statusText}: ${responseText}`);
+	}
 }
 
 export interface GithubIssuePatch {

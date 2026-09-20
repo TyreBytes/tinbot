@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import {
 	addIssuesToStaging,
+	addSubIssue,
 	applyIssuePull,
 	applyStampOnly,
 	buildStagingForest,
@@ -120,6 +121,24 @@ export function getItemSourceLine(item: Item): number | undefined {
 	return itemSourceLine.get(item);
 }
 
+const itemParentIssue = new WeakMap<Item, Item>();
+
+/** The nearest enclosing Issue that an Issue is nested under, skipping over any plain
+ * sections or tasks in between. Undefined for a top-level Issue or one never produced by
+ * parseItems. Used to link a newly created GitHub issue as a sub-issue of its parent. */
+export function getParentIssue(item: Item): Item | undefined {
+	return itemParentIssue.get(item);
+}
+
+function findNearestAncestorIssue(stack: Array<{ depth: number; item: Item }>): Item | undefined {
+	for (let index = stack.length - 1; index >= 0; index -= 1) {
+		if (stack[index].item.kind === 'issue') {
+			return stack[index].item;
+		}
+	}
+	return undefined;
+}
+
 export function parseItems(text: string): Item[] {
 	const root: Item = { kind: 'section', name: '', children: [] };
 	const stack: Array<{ depth: number; item: Item }> = [{ depth: -1, item: root }];
@@ -179,6 +198,12 @@ export function parseItems(text: string): Item[] {
 			const status = taskStatus(marker);
 			const item: Item = status === undefined ? { kind: 'task', name: '', children: [] } : { kind: 'task', name: '', status, children: [] };
 			applyTags(item, rawName);
+			if (item.kind === 'issue') {
+				const parentIssue = findNearestAncestorIssue(stack);
+				if (parentIssue !== undefined) {
+					itemParentIssue.set(item, parentIssue);
+				}
+			}
 			stack[stack.length - 1].item.children.push(item);
 			stack.push({ depth, item });
 			itemSourceLine.set(item, lineIndex);
@@ -342,14 +367,19 @@ async function pushUnsyncedIssuesToGithub(todoUri: vscode.Uri, items: Item[], se
 			throw new Error(`tinbot: no source line recorded for issue "${item.name}"`);
 		}
 
-		const issueId = await createGithubIssue(settings, item.name, item.description ?? '');
+		const created = await createGithubIssue(settings, item.name, item.description ?? '');
 
 		const bytes = await vscode.workspace.fs.readFile(todoUri);
 		const text = new TextDecoder('utf-8').decode(bytes);
-		const patched = applyStampOnly(patchIssueLine(text, lineNumber, issueId), lineNumber, formatSyncedStamp(now));
+		const patched = applyStampOnly(patchIssueLine(text, lineNumber, created.number), lineNumber, formatSyncedStamp(now));
 		await vscode.workspace.fs.writeFile(todoUri, new TextEncoder().encode(patched));
 
-		item.issueId = issueId;
+		item.issueId = created.number;
+
+		const parentIssue = getParentIssue(item);
+		if (parentIssue?.issueId !== undefined) {
+			await addSubIssue(settings, parentIssue.issueId, created.id);
+		}
 	}
 }
 
