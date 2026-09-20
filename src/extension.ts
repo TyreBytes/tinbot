@@ -1,4 +1,14 @@
 import * as vscode from 'vscode';
+import {
+	addIssuesToStaging,
+	buildStagingForest,
+	createGithubIssue,
+	getIssueParent,
+	listOpenIssues,
+	patchIssueLine,
+	ProjectSettings,
+	readProjectSettings,
+} from './github';
 
 export interface Item {
 	kind: 'section' | 'task' | 'issue';
@@ -87,6 +97,12 @@ function trimBlockLines(lines: string[]): string {
 	return lines.slice(start, end).join('\n');
 }
 
+const itemSourceLine = new WeakMap<Item, number>();
+
+export function getItemSourceLine(item: Item): number | undefined {
+	return itemSourceLine.get(item);
+}
+
 export function parseItems(text: string): Item[] {
 	const root: Item = { kind: 'section', name: '', children: [] };
 	const stack: Array<{ depth: number; item: Item }> = [{ depth: -1, item: root }];
@@ -110,7 +126,9 @@ export function parseItems(text: string): Item[] {
 		}
 	};
 
-	for (const rawLine of text.split(/\r?\n/)) {
+	const lines = text.split(/\r?\n/);
+	for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+		const rawLine = lines[lineIndex];
 		const depth = countLeadingTabs(rawLine);
 		const content = rawLine.slice(depth).trim();
 
@@ -129,6 +147,7 @@ export function parseItems(text: string): Item[] {
 			applyTags(item, headerMatch[1].trim());
 			stack[stack.length - 1].item.children.push(item);
 			stack.push({ depth, item });
+			itemSourceLine.set(item, lineIndex);
 			continue;
 		}
 
@@ -145,6 +164,7 @@ export function parseItems(text: string): Item[] {
 			applyTags(item, rawName);
 			stack[stack.length - 1].item.children.push(item);
 			stack.push({ depth, item });
+			itemSourceLine.set(item, lineIndex);
 			continue;
 		}
 
@@ -171,6 +191,88 @@ export async function readItems(baseUri: vscode.Uri): Promise<Item[]> {
 	return parseItems(text);
 }
 
+export function collectUnsyncedIssues(items: Item[]): Item[] {
+	const result: Item[] = [];
+	const walk = (list: Item[]) => {
+		for (const item of list) {
+			if (item.kind === 'issue' && item.issueId === undefined) {
+				result.push(item);
+			}
+			walk(item.children);
+		}
+	};
+	walk(items);
+	return result;
+}
+
+export function collectKnownIssueIds(items: Item[]): Set<number> {
+	const ids = new Set<number>();
+	const walk = (list: Item[]) => {
+		for (const item of list) {
+			if (item.kind === 'issue' && item.issueId !== undefined) {
+				ids.add(item.issueId);
+			}
+			walk(item.children);
+		}
+	};
+	walk(items);
+	return ids;
+}
+
+async function pushUnsyncedIssuesToGithub(baseUri: vscode.Uri, items: Item[], settings: ProjectSettings): Promise<void> {
+	const fileUri = vscode.Uri.joinPath(baseUri, 'task_list.todo');
+	for (const item of collectUnsyncedIssues(items)) {
+		const lineNumber = getItemSourceLine(item);
+		if (lineNumber === undefined) {
+			throw new Error(`tinbot: no source line recorded for issue "${item.name}"`);
+		}
+
+		const issueId = await createGithubIssue(settings, item.name, item.description ?? '');
+
+		const bytes = await vscode.workspace.fs.readFile(fileUri);
+		const text = new TextDecoder('utf-8').decode(bytes);
+		const patched = patchIssueLine(text, lineNumber, issueId);
+		await vscode.workspace.fs.writeFile(fileUri, new TextEncoder().encode(patched));
+
+		item.issueId = issueId;
+	}
+}
+
+async function pullNewIssuesFromGithub(baseUri: vscode.Uri, items: Item[], settings: ProjectSettings): Promise<void> {
+	const knownIds = collectKnownIssueIds(items);
+	const openIssues = await listOpenIssues(settings);
+	const newIssues = openIssues.filter((issue) => !knownIds.has(issue.number)).sort((a, b) => a.number - b.number);
+	if (newIssues.length === 0) {
+		return;
+	}
+
+	const parentOf = new Map<number, number>();
+	for (const issue of newIssues) {
+		const parentNumber = await getIssueParent(settings, issue.number);
+		if (parentNumber !== undefined && newIssues.some((candidate) => candidate.number === parentNumber)) {
+			parentOf.set(issue.number, parentNumber);
+		}
+	}
+
+	const forest = buildStagingForest(newIssues, parentOf);
+
+	const fileUri = vscode.Uri.joinPath(baseUri, 'task_list.todo');
+	const bytes = await vscode.workspace.fs.readFile(fileUri);
+	const text = new TextDecoder('utf-8').decode(bytes);
+	const patched = addIssuesToStaging(text, forest);
+	await vscode.workspace.fs.writeFile(fileUri, new TextEncoder().encode(patched));
+}
+
+async function syncWithGithub(baseUri: vscode.Uri, items: Item[]): Promise<void> {
+	const settings = await readProjectSettings(baseUri);
+	if (settings === undefined) {
+		return;
+	}
+
+	await pushUnsyncedIssuesToGithub(baseUri, items, settings);
+	await pullNewIssuesFromGithub(baseUri, items, settings);
+}
+
 let baseUriOverride: vscode.Uri | undefined;
 
 /** Test-only seam: lets tests point the command at a fixture dir instead of the real extension path. */
@@ -180,14 +282,22 @@ export function __setTestBaseUri(uri: vscode.Uri | undefined): void {
 
 export function activate(context: vscode.ExtensionContext) {
 	const disposable = vscode.commands.registerCommand('tinbot.todoSyncGithub', async () => {
+		const baseUri = baseUriOverride ?? context.extensionUri;
+		let items: Item[];
 		try {
-			const baseUri = baseUriOverride ?? context.extensionUri;
-			const items = await readItems(baseUri);
+			items = await readItems(baseUri);
 			const outputUri = vscode.Uri.joinPath(baseUri, 'tasks.json');
 			const json = JSON.stringify(items, null, 2);
 			await vscode.workspace.fs.writeFile(outputUri, new TextEncoder().encode(json));
 		} catch (err) {
 			vscode.window.showErrorMessage(`tinbot: could not sync tasks: ${err}`);
+			return;
+		}
+
+		try {
+			await syncWithGithub(baseUri, items);
+		} catch (err) {
+			vscode.window.showErrorMessage(`tinbot: could not sync issues to GitHub: ${err}`);
 		}
 	});
 

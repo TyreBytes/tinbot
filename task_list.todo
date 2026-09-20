@@ -1,3 +1,20 @@
+# Issue Staging:
+	☐ @issue3 Buy Spaghetti
+		You need food to survive.
+
+		This is +10 sustenance.
+	☐ @issue4 Make the final Alpha Build
+		This needs to happen someday.
+		☐ @issue6 Fix the build on Windows
+	☐ @issue5 Fix the build on Linux/GCC
+	☐ @issue7 If a name/task is does not match, it needs to be updated...
+		Is the todo list the source of truth, or github? (easiest, least friction for now).
+
+		Ideally it would be the one most recently changed; this would require saving/keeping a
+		'last known todo file' around to detect which difference was the change and that would
+		break the ability to run this extension on multiple machines.
+
+		If both changed; it doesn't matter who wins; this is too minimal to worry about
 
 ☐ This is a first todo.
 ☐ This is a new example task to be done.
@@ -13,18 +30,27 @@
 	Notes on the Tin Bot projects
 	3 month estimate
 
-	☐ Task specict to Tin Bot
+	☐ Tasks specific to Tin Bot
+	☐ @issue8 If a name/task is does not match, it needs to be updated...
+		Is the todo list the source of truth, or github? (easiest, least friction for now).
+
+		Ideally it would be the one most recently changed; this would require saving/keeping a
+		'last known todo file' around to detect which difference was the change and that would
+		break the ability to run this extension on multiple machines.
+
+		If both changed; it doesn't matter who wins; this is too minimal to worry about
+	☐ The issue created on github is not pulling the description into the todo file.
 
 	## Alpha Stage:
 		November 14th - Finish Alpha Dev Stage, Feature Complete (20 days)
 
-		☐ Task specict to Tin Bot Alpha Stage
+		☐ Task specific to Tin Bot Alpha Stage
 		✔ Sign NDA @done(25-11-05 20:01)
 		☐ Race Result Screen
 			☐ sub task of race results screen.
 			✔ car icons @done(25-11-06 10:31)
 		☐ Vehicle Sound Refactoring
-		☐ @issue Fix sound issue and merge crusher
+		☐ @issue2 Fix sound issue and merge crusher
 		☐ @issue1 Create a Rushcremental title/logo
 		✔ Take a few 1080p screenshots for itch.io page @done(25-11-07 11:33)
 

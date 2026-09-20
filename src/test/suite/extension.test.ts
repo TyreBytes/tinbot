@@ -1,6 +1,13 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { __setTestBaseUri, parseItems, readItems } from '../../extension';
+import {
+	__setTestBaseUri,
+	collectKnownIssueIds,
+	collectUnsyncedIssues,
+	getItemSourceLine,
+	parseItems,
+	readItems,
+} from '../../extension';
 import { cleanupTaskListFixture, createTaskListFixture } from '../testUtils';
 
 suite('parseItems - Zero/One/Many/Boundaries', () => {
@@ -235,6 +242,85 @@ suite('parseItems - @issue kind', () => {
 	});
 });
 
+suite('getItemSourceLine - Zero/One/Many/Boundaries', () => {
+	test('One: a single top-level task records line 0', () => {
+		const items = parseItems('☐ Buy milk');
+		assert.strictEqual(getItemSourceLine(items[0]), 0);
+	});
+
+	test('One: a task after leading blank lines records its true line index', () => {
+		const items = parseItems('\n\n☐ Buy milk');
+		assert.strictEqual(getItemSourceLine(items[0]), 2);
+	});
+
+	test('Many: a section and its nested child each record their own line index', () => {
+		const items = parseItems('# Race Weekend:\n\t☐ Race Result Screen');
+		assert.strictEqual(getItemSourceLine(items[0]), 0);
+		assert.strictEqual(getItemSourceLine(items[0].children[0]), 1);
+	});
+
+	test('Boundaries: an item parsed from text with no trailing newline still records correctly', () => {
+		const items = parseItems('☐ First\n☐ Second');
+		assert.strictEqual(getItemSourceLine(items[1]), 1);
+	});
+
+	test('Boundaries: a hand-built Item never produced by parseItems has no recorded line', () => {
+		const item = { kind: 'task' as const, name: 'Not parsed', children: [] };
+		assert.strictEqual(getItemSourceLine(item), undefined);
+	});
+});
+
+suite('collectUnsyncedIssues - Zero/One/Many/Boundaries', () => {
+	test('Zero: a tree with only tasks and sections returns no issues', () => {
+		const items = parseItems('# Section:\n\t☐ A task');
+		assert.deepStrictEqual(collectUnsyncedIssues(items), []);
+	});
+
+	test('One: a single unsynced issue is returned', () => {
+		const items = parseItems('☐ @issue Fix sound issue and merge crusher');
+		assert.deepStrictEqual(collectUnsyncedIssues(items), items);
+	});
+
+	test('Many: unsynced issues nested at multiple depths are all returned, in document order', () => {
+		const text = '☐ @issue Top level issue\n# Section:\n\t☐ @issue Nested issue';
+		const items = parseItems(text);
+		const unsynced = collectUnsyncedIssues(items);
+		assert.deepStrictEqual(
+			unsynced.map((item) => item.name),
+			['Top level issue', 'Nested issue'],
+		);
+	});
+
+	test('Boundaries: an already-synced issue and a plain task are both skipped', () => {
+		const text = '☐ @issue1 Already synced\n☐ Plain task';
+		const items = parseItems(text);
+		assert.deepStrictEqual(collectUnsyncedIssues(items), []);
+	});
+});
+
+suite('collectKnownIssueIds - Zero/One/Many/Boundaries', () => {
+	test('Zero: a tree with no issues returns an empty set', () => {
+		const items = parseItems('☐ Plain task');
+		assert.deepStrictEqual(collectKnownIssueIds(items), new Set());
+	});
+
+	test('One: a single synced issue is included', () => {
+		const items = parseItems('☐ @issue5 Fix the build');
+		assert.deepStrictEqual(collectKnownIssueIds(items), new Set([5]));
+	});
+
+	test('Many: synced issue ids nested at multiple depths are all included', () => {
+		const text = '☐ @issue4 Parent\n\t☐ @issue6 Child\n# Section:\n\t☐ @issue7 In a section';
+		const items = parseItems(text);
+		assert.deepStrictEqual(collectKnownIssueIds(items), new Set([4, 6, 7]));
+	});
+
+	test('Boundaries: an unsynced @issue tag with no number is not included', () => {
+		const items = parseItems('☐ @issue Not synced yet');
+		assert.deepStrictEqual(collectKnownIssueIds(items), new Set());
+	});
+});
+
 suite('readItems - Exercise exceptions', () => {
 	let fixtureDir: string | undefined;
 
@@ -252,7 +338,11 @@ suite('readItems - Exercise exceptions', () => {
 suite('tinbot.todoSyncGithub command - Interface', () => {
 	// Simple scenario / Interface contract test: exercises real command registration
 	// -> readItems -> tasks.json write, against the real bundled task_list.todo.
-	test('todoSyncGithub command writes tasks.json next to the real task_list.todo', async () => {
+	test('todoSyncGithub command writes tasks.json next to the real task_list.todo', async function () {
+		// A real project_settings.secret makes this call out to the live GitHub API
+		// (push, then list, then a parent lookup per new issue), well past mocha's default 2s.
+		this.timeout(20000);
+
 		const extension = vscode.extensions.all.find((e) => e.packageJSON.name === 'tinbot');
 		assert.ok(extension, 'tinbot extension not found');
 
