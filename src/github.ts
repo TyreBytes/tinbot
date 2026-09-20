@@ -76,12 +76,19 @@ export async function createGithubIssue(settings: ProjectSettings, title: string
 	return result.number;
 }
 
-export async function updateGithubIssueTitle(settings: ProjectSettings, issueNumber: number, title: string): Promise<void> {
+export interface GithubIssuePatch {
+	title?: string;
+	body?: string;
+	state?: 'open' | 'closed';
+	state_reason?: 'completed' | 'not_planned';
+}
+
+export async function updateGithubIssue(settings: ProjectSettings, issueNumber: number, patch: GithubIssuePatch): Promise<void> {
 	const { token, owner, repo } = settings.github;
 	const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`, {
 		method: 'PATCH',
 		headers: { ...githubHeaders(token), 'Content-Type': 'application/json' },
-		body: JSON.stringify({ title }),
+		body: JSON.stringify(patch),
 	});
 
 	if (!response.ok) {
@@ -94,6 +101,10 @@ export interface GithubIssue {
 	number: number;
 	title: string;
 	body?: string;
+	state: 'open' | 'closed';
+	stateReason?: string;
+	updatedAt: string;
+	closedAt?: string;
 }
 
 interface ListIssuesApiEntry {
@@ -101,11 +112,15 @@ interface ListIssuesApiEntry {
 	title: string;
 	body?: string | null;
 	pull_request?: unknown;
+	state: string;
+	state_reason?: string | null;
+	updated_at: string;
+	closed_at?: string | null;
 }
 
-export async function listOpenIssues(settings: ProjectSettings): Promise<GithubIssue[]> {
+export async function listAllIssues(settings: ProjectSettings): Promise<GithubIssue[]> {
 	const { token, owner, repo } = settings.github;
-	const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues?state=open&per_page=100`, {
+	const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues?state=all&per_page=100`, {
 		headers: githubHeaders(token),
 	});
 
@@ -119,9 +134,20 @@ export async function listOpenIssues(settings: ProjectSettings): Promise<GithubI
 	return entries
 		.filter((entry) => entry.pull_request === undefined)
 		.map((entry) => {
-			const issue: GithubIssue = { number: entry.number, title: entry.title };
+			const issue: GithubIssue = {
+				number: entry.number,
+				title: entry.title,
+				state: entry.state === 'closed' ? 'closed' : 'open',
+				updatedAt: entry.updated_at,
+			};
 			if (typeof entry.body === 'string' && entry.body.length > 0) {
 				issue.body = entry.body;
+			}
+			if (typeof entry.state_reason === 'string') {
+				issue.stateReason = entry.state_reason;
+			}
+			if (typeof entry.closed_at === 'string') {
+				issue.closedAt = entry.closed_at;
 			}
 			return issue;
 		});
@@ -144,6 +170,62 @@ export async function getIssueParent(settings: ProjectSettings, issueNumber: num
 	const result = (await response.json()) as { number: number };
 	return result.number;
 }
+
+export type TodoStatus = 'open' | 'done' | 'cancelled';
+
+/** Maps a GitHub issue's state/state_reason onto the todo file's open/done/cancelled vocabulary. */
+export function githubStatusToTodoStatus(state: 'open' | 'closed', stateReason?: string): TodoStatus {
+	if (state === 'open') {
+		return 'open';
+	}
+	return stateReason === 'not_planned' ? 'cancelled' : 'done';
+}
+
+export function todoStatusToGithubPatch(status: TodoStatus): { state: 'open' | 'closed'; state_reason?: 'completed' | 'not_planned' } {
+	if (status === 'open') {
+		return { state: 'open' };
+	}
+	return { state: 'closed', state_reason: status === 'cancelled' ? 'not_planned' : 'completed' };
+}
+
+const syncedStampFormatPattern = /^(\d{4})(\d{2})(\d{2}) (\d{2}):(\d{2})$/;
+
+/** The extension's own bookkeeping format for @synced(...): YYYYMMDD HH:MM, always in local time. */
+export function formatSyncedStamp(date: Date): string {
+	const pad = (value: number) => String(value).padStart(2, '0');
+	return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+export function parseSyncedStamp(text: string): Date {
+	const match = text.match(syncedStampFormatPattern);
+	if (match === null) {
+		throw new Error(`parseSyncedStamp: "${text}" is not in the expected YYYYMMDD HH:MM format`);
+	}
+	const [, year, month, day, hour, minute] = match;
+	return new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
+}
+
+export function splitTextLines(text: string): { eol: string; lines: string[] } {
+	const eol = text.includes('\r\n') ? '\r\n' : '\n';
+	return { eol, lines: text.split(/\r\n|\n/) };
+}
+
+export function joinTextLines(lines: string[], eol: string): string {
+	return lines.join(eol);
+}
+
+function countLeadingTabsLocal(line: string): number {
+	let count = 0;
+	while (count < line.length && line[count] === '\t') {
+		count += 1;
+	}
+	return count;
+}
+
+// Mirrors extension.ts's own taskMarkerPattern/sectionHeaderPattern: github.ts stays free of
+// any dependency on extension.ts, so the shapes it needs to recognize are duplicated here.
+const taskMarkerPatternLocal = /^[☐✔✘]\s*/;
+const sectionHeaderPatternLocal = /^#+\s*(.+):$/;
 
 export interface StagingIssue {
 	number: number;
@@ -177,41 +259,98 @@ export function buildStagingForest(issues: GithubIssue[], parentOf: Map<number, 
 	return roots;
 }
 
-const issueStagingHeader = '# Issue Staging:';
-
-function countLeadingTabsLocal(line: string): number {
-	let count = 0;
-	while (count < line.length && line[count] === '\t') {
-		count += 1;
-	}
-	return count;
+export interface IssueLineFields {
+	issueId: number;
+	tags?: string[];
+	name: string;
+	status: TodoStatus;
+	statusDate?: string;
+	syncedAt: string;
 }
 
-function renderStagingLines(issues: StagingIssue[], depth: number): string[] {
-	const lines: string[] = [];
-	const indent = '\t'.repeat(depth + 1);
-	for (const issue of issues) {
-		lines.push(`${'\t'.repeat(depth)}☐ @issue${issue.number} ${issue.title}`);
-		if (issue.description !== undefined) {
-			// Written verbatim, markdown and all: parseItems() reads these as plain-text
-			// lines with no marker, so they come back as this issue's .description.
-			for (const descriptionLine of issue.description.split(/\r\n|\n/)) {
-				lines.push(descriptionLine.length === 0 ? '' : `${indent}${descriptionLine}`);
-			}
+/** Renders one issue's todo line in the extension's canonical tag order: issue tag, other
+ * tags, name, done/cancelled date, @synced last. */
+export function renderIssueLine(depth: number, fields: IssueLineFields): string {
+	const marker = fields.status === 'done' ? '✔' : fields.status === 'cancelled' ? '✘' : '☐';
+	const otherTags = (fields.tags ?? []).map((tag) => `@${tag}`);
+	const parts = [`@issue${fields.issueId}`, ...otherTags, fields.name];
+	let line = `${'\t'.repeat(depth)}${marker} ${parts.join(' ')}`;
+	if (fields.status !== 'open' && fields.statusDate !== undefined) {
+		line += ` @${fields.status}(${fields.statusDate})`;
+	}
+	return `${line} @synced(${fields.syncedAt})`;
+}
+
+const syncedTagPattern = /\s*@synced\([^)]*\)/;
+
+/** Replaces (or appends) the @synced(...) tag on a line so it always ends up last. */
+export function setSyncedTag(line: string, syncedAt: string): string {
+	return `${line.replace(syncedTagPattern, '')} @synced(${syncedAt})`;
+}
+
+/** Renders a description as indented lines, one tab deeper than the item. Written verbatim,
+ * markdown and all: parseItems() reads these back as plain-text lines with no marker. An
+ * empty description renders as no lines at all, so a pull can clear a description cleanly. */
+export function renderDescriptionBlockLines(description: string, itemDepth: number): string[] {
+	if (description.length === 0) {
+		return [];
+	}
+	const indent = '\t'.repeat(itemDepth + 1);
+	return description.split(/\r\n|\n/).map((line) => (line.length === 0 ? '' : `${indent}${line}`));
+}
+
+/**
+ * Finds the extent of an item's own (leading) description block: the run of lines
+ * immediately after its line, up to the first child (task/section) line or a dedent to the
+ * item's own depth or shallower, whichever comes first. Trailing blank lines are excluded.
+ * This covers every item in practice, including one with a description followed by
+ * children, but does not locate description text written after or between children.
+ */
+export function findDescriptionBlockExtent(lines: string[], itemLineIndex: number): { start: number; end: number } {
+	const itemDepth = countLeadingTabsLocal(lines[itemLineIndex]);
+	let end = itemLineIndex + 1;
+	while (end < lines.length) {
+		const line = lines[end];
+		const trimmed = line.trim();
+		if (trimmed.length === 0) {
+			end += 1;
+			continue;
 		}
-		lines.push(...renderStagingLines(issue.children, depth + 1));
+		if (countLeadingTabsLocal(line) <= itemDepth) {
+			break;
+		}
+		if (taskMarkerPatternLocal.test(trimmed) || sectionHeaderPatternLocal.test(trimmed)) {
+			break;
+		}
+		end += 1;
+	}
+
+	let trimmedEnd = end;
+	while (trimmedEnd > itemLineIndex + 1 && lines[trimmedEnd - 1].trim().length === 0) {
+		trimmedEnd -= 1;
+	}
+	return { start: itemLineIndex + 1, end: trimmedEnd };
+}
+
+function renderStagingLines(issues: StagingIssue[], depth: number, syncedAt: string): string[] {
+	const lines: string[] = [];
+	for (const issue of issues) {
+		lines.push(renderIssueLine(depth, { issueId: issue.number, name: issue.title, status: 'open', syncedAt }));
+		lines.push(...renderDescriptionBlockLines(issue.description ?? '', depth));
+		lines.push(...renderStagingLines(issue.children, depth + 1, syncedAt));
 	}
 	return lines;
 }
 
-export function addIssuesToStaging(text: string, issues: StagingIssue[]): string {
+const issueStagingHeader = '# Issue Staging:';
+
+export function addIssuesToStaging(text: string, issues: StagingIssue[], syncedAt: string): string {
 	if (issues.length === 0) {
 		return text;
 	}
 
-	const eol = text.includes('\r\n') ? '\r\n' : '\n';
-	const lines = text.split(/\r\n|\n/);
-	const newLines = renderStagingLines(issues, 1);
+	const { eol, lines } = splitTextLines(text);
+	const newLines = renderStagingLines(issues, 1, syncedAt);
 
 	const headerIndex = lines.findIndex((line) => line.trim() === issueStagingHeader && countLeadingTabsLocal(line) === 0);
 
@@ -220,7 +359,7 @@ export function addIssuesToStaging(text: string, issues: StagingIssue[]): string
 		while (start < lines.length && lines[start].trim().length === 0) {
 			start += 1;
 		}
-		return [issueStagingHeader, ...newLines, '', ...lines.slice(start)].join(eol);
+		return joinTextLines([issueStagingHeader, ...newLines, '', ...lines.slice(start)], eol);
 	}
 
 	let insertAt = headerIndex + 1;
@@ -241,24 +380,53 @@ export function addIssuesToStaging(text: string, issues: StagingIssue[]): string
 	const after = lines.slice(insertAt);
 	const separator = after.length > 0 ? [''] : [];
 
-	return [...before, ...newLines, ...separator, ...after].join(eol);
+	return joinTextLines([...before, ...newLines, ...separator, ...after], eol);
 }
 
-const issueTagPattern = /@issue(?![\w-])/;
+const bareIssueTagPattern = /@issue(?![\w-])/;
 
 export function patchIssueLine(text: string, lineNumber: number, issueId: number): string {
-	const eol = text.includes('\r\n') ? '\r\n' : '\n';
-	const lines = text.split(/\r\n|\n/);
+	const { eol, lines } = splitTextLines(text);
 	const target = lines[lineNumber];
 	if (target === undefined) {
 		throw new Error(`patchIssueLine: line ${lineNumber} does not exist (file has ${lines.length} lines)`);
 	}
 
-	const patched = target.replace(issueTagPattern, `@issue${issueId}`);
+	const patched = target.replace(bareIssueTagPattern, `@issue${issueId}`);
 	if (patched === target) {
 		throw new Error(`patchIssueLine: line ${lineNumber} has no unsynced @issue tag: ${JSON.stringify(target)}`);
 	}
 
 	lines[lineNumber] = patched;
-	return lines.join(eol);
+	return joinTextLines(lines, eol);
+}
+
+/** Pull direction: rewrites an issue's line and its leading description block from GitHub's
+ * current title/status/body, and stamps @synced. */
+export function applyIssuePull(text: string, item: { tags?: string[] }, lineNumber: number, issue: GithubIssue, syncedAt: string): string {
+	const { eol, lines } = splitTextLines(text);
+	const depth = countLeadingTabsLocal(lines[lineNumber]);
+	const status = githubStatusToTodoStatus(issue.state, issue.stateReason);
+	const statusDate = status === 'open' ? undefined : formatSyncedStamp(new Date(issue.closedAt ?? issue.updatedAt));
+
+	lines[lineNumber] = renderIssueLine(depth, {
+		issueId: issue.number,
+		tags: item.tags,
+		name: issue.title,
+		status,
+		statusDate,
+		syncedAt,
+	});
+
+	const { start, end } = findDescriptionBlockExtent(lines, lineNumber);
+	lines.splice(start, end - start, ...renderDescriptionBlockLines(issue.body ?? '', depth));
+
+	return joinTextLines(lines, eol);
+}
+
+/** Push direction: the todo file is already correct, so only its @synced stamp is touched. */
+export function applyStampOnly(text: string, lineNumber: number, syncedAt: string): string {
+	const { eol, lines } = splitTextLines(text);
+	lines[lineNumber] = setSyncedTag(lines[lineNumber], syncedAt);
+	return joinTextLines(lines, eol);
 }

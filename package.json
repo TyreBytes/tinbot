@@ -10,14 +10,26 @@
     "Other"
   ],
   "main": "./out/extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "commands": [
       {
         "command": "tinbot.todoSyncGithub",
         "title": "TodoSyncGithub"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "tinbot",
+      "properties": {
+        "tinbot.colors.syncTag": {
+          "type": "boolean",
+          "default": true,
+          "description": "Dim the @synced(...) bookkeeping tag in .todo files."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

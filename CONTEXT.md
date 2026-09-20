@@ -63,3 +63,10 @@ _Avoid_: cancelDate, droppedAt
 The list of `@word` tokens on an Item's line, other than `@done(...)`, in
 the order they appear.
 _Avoid_: labels
+
+**syncedAt**:
+The raw text inside an Item's `@synced(...)` token. Tinbot writes this
+tag always as the last tag on the line. It records the time of tinbot's
+last reconciliation of this Issue against GitHub. It stays unset until
+an Issue's first reconciliation.
+_Avoid_: lastSynced, syncDate

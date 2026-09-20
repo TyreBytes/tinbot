@@ -3,13 +3,26 @@ import * as vscode from 'vscode';
 import {
 	__setTestBaseUri,
 	collectKnownIssueIds,
-	collectMismatchedIssueTitles,
+	collectKnownIssueMatches,
 	collectUnsyncedIssues,
+	decideSyncDirection,
+	findSyncedTagRanges,
 	getItemSourceLine,
+	issueMatchesGithub,
+	Item,
 	parseItems,
 	readItems,
 } from '../../extension';
+import { formatSyncedStamp, GithubIssue } from '../../github';
 import { cleanupTaskListFixture, createTaskListFixture } from '../testUtils';
+
+function makeIssue(number: number, title: string, extra: Partial<GithubIssue> = {}): GithubIssue {
+	return { number, title, state: 'open', updatedAt: '2026-09-20T09:00:00.000Z', ...extra };
+}
+
+function makeIssueItem(overrides: Partial<Item> = {}): Item {
+	return { kind: 'issue', name: 'Fix the build', issueId: 5, children: [], ...overrides };
+}
 
 suite('parseItems - Zero/One/Many/Boundaries', () => {
 	test('Zero: empty text resolves to no items', () => {
@@ -322,48 +335,153 @@ suite('collectKnownIssueIds - Zero/One/Many/Boundaries', () => {
 	});
 });
 
-suite('collectMismatchedIssueTitles - Zero/One/Many/Boundaries', () => {
-	test('Zero: no open issues returns no mismatches', () => {
+suite('parseItems - @synced tag', () => {
+	test('Zero: a line with no @synced tag has no syncedAt field', () => {
 		const items = parseItems('☐ @issue5 Fix the build');
-		assert.deepStrictEqual(collectMismatchedIssueTitles(items, []), []);
+		assert.ok(!Object.prototype.hasOwnProperty.call(items[0], 'syncedAt'));
 	});
 
-	test('Zero: a matching title returns no mismatch', () => {
-		const items = parseItems('☐ @issue5 Fix the build');
-		const openIssues = [{ number: 5, title: 'Fix the build' }];
-		assert.deepStrictEqual(collectMismatchedIssueTitles(items, openIssues), []);
+	test('One: an @synced(...) token is removed from name and stored in syncedAt', () => {
+		assert.deepStrictEqual(parseItems('☐ @issue5 Fix the build @synced(20260920 09:00)'), [
+			{ kind: 'issue', name: 'Fix the build', issueId: 5, syncedAt: '20260920 09:00', children: [] },
+		]);
+	});
+});
+
+suite('issueMatchesGithub - Zero/One/Many/Boundaries', () => {
+	test('Zero: identical title, status, and description match', () => {
+		const item = makeIssueItem({ description: 'Some details.' });
+		const issue = makeIssue(5, 'Fix the build', { body: 'Some details.' });
+		assert.strictEqual(issueMatchesGithub(item, issue), true);
 	});
 
-	test('One: a differing title returns one mismatch naming the todo file name', () => {
+	test('One: a differing title does not match', () => {
+		const item = makeIssueItem({ name: 'Fix the build' });
+		const issue = makeIssue(5, 'A different title');
+		assert.strictEqual(issueMatchesGithub(item, issue), false);
+	});
+
+	test('One: a differing status does not match', () => {
+		const item = makeIssueItem({ status: 'done' });
+		const issue = makeIssue(5, 'Fix the build', { state: 'open' });
+		assert.strictEqual(issueMatchesGithub(item, issue), false);
+	});
+
+	test('Many: an undefined todo description and an empty GitHub body count as equal', () => {
+		const item = makeIssueItem();
+		const issue = makeIssue(5, 'Fix the build', { body: undefined });
+		assert.strictEqual(issueMatchesGithub(item, issue), true);
+	});
+
+	test('Boundaries: a genuinely differing description does not match', () => {
+		const item = makeIssueItem({ description: 'Todo description.' });
+		const issue = makeIssue(5, 'Fix the build', { body: 'GitHub description.' });
+		assert.strictEqual(issueMatchesGithub(item, issue), false);
+	});
+});
+
+suite('decideSyncDirection - Zero/One/Many/Boundaries', () => {
+	const now = new Date('2026-09-20T09:30:00.000Z');
+	const lastSyncedAt = new Date('2026-09-20T09:00:00.000Z');
+
+	test('Zero: no @synced stamp yet always baselines, even when both sides already match', () => {
+		const item = makeIssueItem();
+		const issue = makeIssue(5, 'Fix the build');
+		assert.strictEqual(decideSyncDirection(item, issue), 'baseline');
+	});
+
+	test('Zero: no @synced stamp yet baselines even when the sides differ', () => {
+		const item = makeIssueItem({ name: 'Fix the build' });
+		const issue = makeIssue(5, 'A different title on GitHub');
+		assert.strictEqual(decideSyncDirection(item, issue), 'baseline');
+	});
+
+	test('One: GitHub updated after the last sync pulls', () => {
+		const item = makeIssueItem({ syncedAt: formatSyncedStamp(lastSyncedAt) });
+		const githubUpdatedAt = new Date('2026-09-20T09:15:00.000Z');
+		const issue = makeIssue(5, 'A new title on GitHub', { updatedAt: githubUpdatedAt.toISOString() });
+		assert.strictEqual(decideSyncDirection(item, issue), 'pull');
+	});
+
+	test('One: GitHub unchanged since the last sync but the todo file differs pushes', () => {
+		const item = makeIssueItem({ name: 'A new todo title', syncedAt: formatSyncedStamp(lastSyncedAt) });
+		const issue = makeIssue(5, 'Fix the build', { updatedAt: lastSyncedAt.toISOString() });
+		assert.strictEqual(decideSyncDirection(item, issue), 'push');
+	});
+
+	test('Many: GitHub unchanged since the last sync and both sides match needs no action', () => {
+		const item = makeIssueItem({ syncedAt: formatSyncedStamp(lastSyncedAt) });
+		const issue = makeIssue(5, 'Fix the build', { updatedAt: lastSyncedAt.toISOString() });
+		assert.strictEqual(decideSyncDirection(item, issue), 'none');
+	});
+
+	test('Boundaries: a GitHub updatedAt exactly equal to the last sync stamp is not treated as a pull', () => {
+		const item = makeIssueItem({ name: 'A new todo title', syncedAt: formatSyncedStamp(lastSyncedAt) });
+		const issue = makeIssue(5, 'Fix the build', { updatedAt: lastSyncedAt.toISOString() });
+		assert.notStrictEqual(decideSyncDirection(item, issue), 'pull');
+	});
+});
+
+suite('collectKnownIssueMatches - Zero/One/Many/Boundaries', () => {
+	test('Zero: no issues in the tree returns no matches', () => {
+		const items = parseItems('☐ Plain task');
+		assert.deepStrictEqual(collectKnownIssueMatches(items, [makeIssue(5, 'Unrelated')]), []);
+	});
+
+	test('One: a single known issue is matched to its GitHub counterpart', () => {
 		const items = parseItems('☐ @issue5 Fix the build');
-		const openIssues = [{ number: 5, title: 'Old title on GitHub' }];
-		assert.deepStrictEqual(collectMismatchedIssueTitles(items, openIssues), [
-			{ item: items[0], issueNumber: 5 },
+		const issue = makeIssue(5, 'Fix the build');
+		assert.deepStrictEqual(collectKnownIssueMatches(items, [issue]), [{ item: items[0], issue }]);
+	});
+
+	test('Many: several known issues nested at multiple depths are all matched, in tree order', () => {
+		const text = '☐ @issue4 Parent\n\t☐ @issue6 Child';
+		const items = parseItems(text);
+		const parentIssue = makeIssue(4, 'Parent');
+		const childIssue = makeIssue(6, 'Child');
+		assert.deepStrictEqual(collectKnownIssueMatches(items, [childIssue, parentIssue]), [
+			{ item: items[0], issue: parentIssue },
+			{ item: items[0].children[0], issue: childIssue },
 		]);
 	});
 
-	test('Many: several differing titles are all returned, in openIssues order', () => {
-		const items = parseItems('☐ @issue4 Parent issue\n☐ @issue6 Child issue');
-		const openIssues = [
-			{ number: 4, title: 'Old parent title' },
-			{ number: 6, title: 'Old child title' },
-		];
-		assert.deepStrictEqual(
-			collectMismatchedIssueTitles(items, openIssues).map((mismatch) => mismatch.issueNumber),
-			[4, 6],
-		);
+	test('Boundaries: a GitHub issue not referenced by any todo item is simply not matched', () => {
+		const items = parseItems('☐ @issue5 Fix the build');
+		const matches = collectKnownIssueMatches(items, [makeIssue(5, 'Fix the build'), makeIssue(9, 'Unrelated issue')]);
+		assert.strictEqual(matches.length, 1);
 	});
 
 	test('Boundaries: an unsynced issue with no issueId is skipped', () => {
 		const items = parseItems('☐ @issue Fix the build');
-		const openIssues = [{ number: 5, title: 'Fix the build (renamed)' }];
-		assert.deepStrictEqual(collectMismatchedIssueTitles(items, openIssues), []);
+		assert.deepStrictEqual(collectKnownIssueMatches(items, [makeIssue(5, 'Fix the build')]), []);
+	});
+});
+
+suite('findSyncedTagRanges - Zero/One/Many/Boundaries', () => {
+	test('Zero: text with no @synced tag returns no ranges', () => {
+		assert.deepStrictEqual(findSyncedTagRanges('☐ @issue5 Fix the build'), []);
 	});
 
-	test('Boundaries: an open issue not present in the todo file is skipped', () => {
-		const items = parseItems('☐ @issue5 Fix the build');
-		const openIssues = [{ number: 9, title: 'Not in todo file' }];
-		assert.deepStrictEqual(collectMismatchedIssueTitles(items, openIssues), []);
+	test('One: a single @synced tag is found, including its leading space', () => {
+		const text = '☐ @issue5 Fix the build @synced(20260920 09:00)';
+		const ranges = findSyncedTagRanges(text);
+		assert.strictEqual(ranges.length, 1);
+		assert.strictEqual(text.slice(ranges[0].start, ranges[0].end), ' @synced(20260920 09:00)');
+	});
+
+	test('Many: a @synced tag on each of several lines is found once per line, with the right line index', () => {
+		const text = '☐ @issue5 First @synced(20260920 09:00)\n☐ @issue6 Second @synced(20260920 09:00)';
+		const ranges = findSyncedTagRanges(text);
+		assert.deepStrictEqual(
+			ranges.map((range) => range.line),
+			[0, 1],
+		);
+	});
+
+	test('Boundaries: a tag containing an internal space is matched as one range', () => {
+		const text = '☐ @issue5 Fix the build @synced(20260920 09:00)';
+		const ranges = findSyncedTagRanges(text);
+		assert.strictEqual(ranges[0].end - ranges[0].start, ' @synced(20260920 09:00)'.length);
 	});
 });
 

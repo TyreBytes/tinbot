@@ -1,13 +1,15 @@
 # Issue Staging:
-	☐ @issue3 Buy Spaghetti
+	✘ @issue3 Buy Spaghetti @cancelled(20260920 14:15) @synced(20260920 14:15)
 		You need food to survive.
 
 		This is +10 sustenance.
-	☐ @issue4 Make the final Alpha Build
+
+		Canceled: we are going to buy pizza instead.
+	☐ @issue4 Make the final Alpha Build @synced(20260920 14:02)
 		This needs to happen someday.
-		☐ @issue6 Fix the build on Windows
-	☐ @issue5 Fix the build on Linux/GCC
-	☐ @issue7 If a name/task is does not match, it needs to be updated...
+		☐ @issue6 Fix the build on Windows @synced(20260920 14:02)
+	☐ @issue5 Fix the build on Linux/GCC @synced(20260920 14:02)
+	☐ @issue7 If a name/task is does not match, it needs to be updated... @synced(20260920 14:02)
 		Is the todo list the source of truth, or github? (easiest, least friction for now).
 
 		Ideally it would be the one most recently changed; this would require saving/keeping a
@@ -31,7 +33,7 @@
 	3 month estimate
 
 	☐ Tasks specific to Tin Bot
-	☐ @issue8 If a name/task is does not match, it needs to be updated...
+	✔ @issue8 If a name/task is does not match, it needs to be updated... @done(20260920 14:10) @synced(20260920 14:12)
 		Is the todo list the source of truth, or github? (easiest, least friction for now).
 
 		Ideally it would be the one most recently changed; this would require saving/keeping a
@@ -55,8 +57,9 @@
 			☐ sub task of race results screen.
 			✔ car icons @done(25-11-06 10:31)
 		☐ Vehicle Sound Refactoring
-		☐ @issue2 Fix sound issue and merge crusher
-		☐ @issue1 Create a Rushcremental title/logo
+		✘ @issue2 Fix sound issue and merge crusher @cancelled(20260920 14:13) @synced(20260920 14:15)
+			This is not happening because I need to test a cancel thing.
+		✔ @issue1 Create a Rushcremental title/logo @done(20260920 14:12) @synced(20260920 14:13)
 		✔ Take a few 1080p screenshots for itch.io page @done(25-11-07 11:33)
 
 	# Pain Points of TurtleBrains:

@@ -1,15 +1,22 @@
 import * as vscode from 'vscode';
 import {
 	addIssuesToStaging,
+	applyIssuePull,
+	applyStampOnly,
 	buildStagingForest,
 	createGithubIssue,
+	formatSyncedStamp,
 	getIssueParent,
 	GithubIssue,
-	listOpenIssues,
+	githubStatusToTodoStatus,
+	listAllIssues,
+	parseSyncedStamp,
 	patchIssueLine,
 	ProjectSettings,
 	readProjectSettings,
-	updateGithubIssueTitle,
+	TodoStatus,
+	todoStatusToGithubPatch,
+	updateGithubIssue,
 } from './github';
 
 export interface Item {
@@ -21,6 +28,7 @@ export interface Item {
 	completedDate?: string;
 	cancelledDate?: string;
 	issueId?: number;
+	syncedAt?: string;
 	children: Item[];
 }
 
@@ -28,6 +36,7 @@ const sectionHeaderPattern = /^#+\s*(.+):$/;
 const taskMarkerPattern = /^[☐✔✘]\s*/;
 const doneTagPattern = /@done\(([^)]+)\)/;
 const cancelledTagPattern = /@cancelled\(([^)]+)\)/;
+const syncedTagPattern = /@synced\(([^)]+)\)/;
 const issueTagPattern = /@issue(\d+)?(?![\w-])/;
 const genericTagPattern = /@\w[\w-]*/g;
 
@@ -62,6 +71,12 @@ function applyTags(item: Item, rawName: string): void {
 	if (cancelledMatch) {
 		item.cancelledDate = cancelledMatch[1];
 		name = name.replace(cancelledTagPattern, '');
+	}
+
+	const syncedMatch = name.match(syncedTagPattern);
+	if (syncedMatch) {
+		item.syncedAt = syncedMatch[1];
+		name = name.replace(syncedTagPattern, '');
 	}
 
 	if (item.kind === 'task') {
@@ -221,41 +236,108 @@ export function collectKnownIssueIds(items: Item[]): Set<number> {
 	return ids;
 }
 
-export interface IssueTitleMismatch {
-	item: Item;
-	issueNumber: number;
+function itemIssueStatus(item: Item): TodoStatus {
+	return item.status ?? 'open';
 }
 
-/** For an issue known on both sides, the todo file's name wins over the GitHub title. */
-export function collectMismatchedIssueTitles(items: Item[], openIssues: GithubIssue[]): IssueTitleMismatch[] {
-	const itemsById = new Map<number, Item>();
+/** Whether the todo item and its matching GitHub issue already agree on title, status, and description. */
+export function issueMatchesGithub(item: Item, issue: GithubIssue): boolean {
+	if (item.name !== issue.title) {
+		return false;
+	}
+	if (itemIssueStatus(item) !== githubStatusToTodoStatus(issue.state, issue.stateReason)) {
+		return false;
+	}
+	return (item.description ?? '') === (issue.body ?? '');
+}
+
+export type SyncDirection = 'baseline' | 'pull' | 'push' | 'none';
+
+/**
+ * Decides how one already-synced issue should be reconciled against its GitHub counterpart.
+ * An issue with no @synced stamp yet is only ever baselined (stamped, nothing pushed or
+ * pulled) so a fresh one-sided edit on either side can never be silently overwritten by a
+ * guess. Once a stamp exists: GitHub having changed since it wins (pull); otherwise, any
+ * remaining difference must have come from the todo file, so it wins (push).
+ */
+export function decideSyncDirection(item: Item, issue: GithubIssue): SyncDirection {
+	if (item.syncedAt === undefined) {
+		return 'baseline';
+	}
+	const syncedAt = parseSyncedStamp(item.syncedAt);
+	const githubUpdatedAt = new Date(issue.updatedAt);
+	if (githubUpdatedAt.getTime() > syncedAt.getTime()) {
+		return 'pull';
+	}
+	return issueMatchesGithub(item, issue) ? 'none' : 'push';
+}
+
+export interface IssueMatch {
+	item: Item;
+	issue: GithubIssue;
+}
+
+export function collectKnownIssueMatches(items: Item[], issues: GithubIssue[]): IssueMatch[] {
+	const issueByNumber = new Map<number, GithubIssue>();
+	for (const issue of issues) {
+		issueByNumber.set(issue.number, issue);
+	}
+
+	const matches: IssueMatch[] = [];
 	const walk = (list: Item[]) => {
 		for (const item of list) {
 			if (item.kind === 'issue' && item.issueId !== undefined) {
-				itemsById.set(item.issueId, item);
+				const issue = issueByNumber.get(item.issueId);
+				if (issue !== undefined) {
+					matches.push({ item, issue });
+				}
 			}
 			walk(item.children);
 		}
 	};
 	walk(items);
+	return matches;
+}
 
-	const mismatches: IssueTitleMismatch[] = [];
-	for (const issue of openIssues) {
-		const item = itemsById.get(issue.number);
-		if (item !== undefined && item.name !== issue.title) {
-			mismatches.push({ item, issueNumber: issue.number });
+async function reconcileKnownIssues(baseUri: vscode.Uri, items: Item[], issues: GithubIssue[], settings: ProjectSettings, now: Date): Promise<void> {
+	const pending = collectKnownIssueMatches(items, issues)
+		.map((match) => ({ match, direction: decideSyncDirection(match.item, match.issue) }))
+		.filter((entry) => entry.direction !== 'none')
+		.sort((a, b) => getItemSourceLine(b.match.item)! - getItemSourceLine(a.match.item)!);
+
+	if (pending.length === 0) {
+		return;
+	}
+
+	const fileUri = vscode.Uri.joinPath(baseUri, 'task_list.todo');
+	let text = new TextDecoder('utf-8').decode(await vscode.workspace.fs.readFile(fileUri));
+	const syncedAt = formatSyncedStamp(now);
+
+	for (const entry of pending) {
+		const { item, issue } = entry.match;
+		const lineNumber = getItemSourceLine(item);
+		if (lineNumber === undefined) {
+			throw new Error(`tinbot: no source line recorded for issue #${issue.number}`);
 		}
+
+		if (entry.direction === 'pull') {
+			text = applyIssuePull(text, item, lineNumber, issue, syncedAt);
+			continue;
+		}
+		if (entry.direction === 'push') {
+			await updateGithubIssue(settings, issue.number, {
+				title: item.name,
+				body: item.description ?? '',
+				...todoStatusToGithubPatch(itemIssueStatus(item)),
+			});
+		}
+		text = applyStampOnly(text, lineNumber, syncedAt);
 	}
-	return mismatches;
+
+	await vscode.workspace.fs.writeFile(fileUri, new TextEncoder().encode(text));
 }
 
-async function pushMismatchedIssueTitles(mismatches: IssueTitleMismatch[], settings: ProjectSettings): Promise<void> {
-	for (const mismatch of mismatches) {
-		await updateGithubIssueTitle(settings, mismatch.issueNumber, mismatch.item.name);
-	}
-}
-
-async function pushUnsyncedIssuesToGithub(baseUri: vscode.Uri, items: Item[], settings: ProjectSettings): Promise<void> {
+async function pushUnsyncedIssuesToGithub(baseUri: vscode.Uri, items: Item[], settings: ProjectSettings, now: Date): Promise<void> {
 	const fileUri = vscode.Uri.joinPath(baseUri, 'task_list.todo');
 	for (const item of collectUnsyncedIssues(items)) {
 		const lineNumber = getItemSourceLine(item);
@@ -267,14 +349,20 @@ async function pushUnsyncedIssuesToGithub(baseUri: vscode.Uri, items: Item[], se
 
 		const bytes = await vscode.workspace.fs.readFile(fileUri);
 		const text = new TextDecoder('utf-8').decode(bytes);
-		const patched = patchIssueLine(text, lineNumber, issueId);
+		const patched = applyStampOnly(patchIssueLine(text, lineNumber, issueId), lineNumber, formatSyncedStamp(now));
 		await vscode.workspace.fs.writeFile(fileUri, new TextEncoder().encode(patched));
 
 		item.issueId = issueId;
 	}
 }
 
-async function pullNewIssuesFromGithub(baseUri: vscode.Uri, items: Item[], openIssues: GithubIssue[], settings: ProjectSettings): Promise<void> {
+async function pullNewIssuesFromGithub(
+	baseUri: vscode.Uri,
+	items: Item[],
+	openIssues: GithubIssue[],
+	settings: ProjectSettings,
+	now: Date,
+): Promise<void> {
 	const knownIds = collectKnownIssueIds(items);
 	const newIssues = openIssues.filter((issue) => !knownIds.has(issue.number)).sort((a, b) => a.number - b.number);
 	if (newIssues.length === 0) {
@@ -294,7 +382,7 @@ async function pullNewIssuesFromGithub(baseUri: vscode.Uri, items: Item[], openI
 	const fileUri = vscode.Uri.joinPath(baseUri, 'task_list.todo');
 	const bytes = await vscode.workspace.fs.readFile(fileUri);
 	const text = new TextDecoder('utf-8').decode(bytes);
-	const patched = addIssuesToStaging(text, forest);
+	const patched = addIssuesToStaging(text, forest, formatSyncedStamp(now));
 	await vscode.workspace.fs.writeFile(fileUri, new TextEncoder().encode(patched));
 }
 
@@ -304,11 +392,35 @@ async function syncWithGithub(baseUri: vscode.Uri, items: Item[]): Promise<void>
 		return;
 	}
 
-	await pushUnsyncedIssuesToGithub(baseUri, items, settings);
+	const now = new Date();
+	await pushUnsyncedIssuesToGithub(baseUri, items, settings, now);
 
-	const openIssues = await listOpenIssues(settings);
-	await pushMismatchedIssueTitles(collectMismatchedIssueTitles(items, openIssues), settings);
-	await pullNewIssuesFromGithub(baseUri, items, openIssues, settings);
+	const allIssues = await listAllIssues(settings);
+	await reconcileKnownIssues(baseUri, items, allIssues, settings, now);
+
+	const openIssues = allIssues.filter((issue) => issue.state === 'open');
+	await pullNewIssuesFromGithub(baseUri, items, openIssues, settings, now);
+}
+
+const syncedTagWithLeadingSpacePattern = /\s?@synced\([^)]*\)/g;
+
+/** Per-line offsets of every @synced(...) tag in the text, including one leading space so
+ * hiding it leaves no gap between it and the previous word. */
+export function findSyncedTagRanges(text: string): Array<{ line: number; start: number; end: number }> {
+	const ranges: Array<{ line: number; start: number; end: number }> = [];
+	text.split(/\r\n|\n/).forEach((line, lineIndex) => {
+		syncedTagWithLeadingSpacePattern.lastIndex = 0;
+		let match = syncedTagWithLeadingSpacePattern.exec(line);
+		while (match !== null) {
+			ranges.push({ line: lineIndex, start: match.index, end: match.index + match[0].length });
+			match = syncedTagWithLeadingSpacePattern.exec(line);
+		}
+	});
+	return ranges;
+}
+
+function isTodoDocument(document: vscode.TextDocument): boolean {
+	return document.uri.fsPath.endsWith('.todo');
 }
 
 let baseUriOverride: vscode.Uri | undefined;
@@ -319,6 +431,35 @@ export function __setTestBaseUri(uri: vscode.Uri | undefined): void {
 }
 
 export function activate(context: vscode.ExtensionContext) {
+	const syncedDecorationType = vscode.window.createTextEditorDecorationType({ opacity: '0.35' });
+
+	const updateSyncedDecorations = (editor: vscode.TextEditor | undefined): void => {
+		if (editor === undefined || !isTodoDocument(editor.document)) {
+			return;
+		}
+		const dimEnabled = vscode.workspace.getConfiguration('tinbot').get<boolean>('colors.syncTag', true);
+		const ranges = dimEnabled
+			? findSyncedTagRanges(editor.document.getText()).map(({ line, start, end }) => new vscode.Range(line, start, line, end))
+			: [];
+		editor.setDecorations(syncedDecorationType, ranges);
+	};
+
+	updateSyncedDecorations(vscode.window.activeTextEditor);
+
+	context.subscriptions.push(
+		syncedDecorationType,
+		vscode.window.onDidChangeActiveTextEditor(updateSyncedDecorations),
+		vscode.workspace.onDidChangeTextDocument((event) => {
+			const editor = vscode.window.visibleTextEditors.find((candidate) => candidate.document === event.document);
+			updateSyncedDecorations(editor);
+		}),
+		vscode.workspace.onDidChangeConfiguration((event) => {
+			if (event.affectsConfiguration('tinbot.colors.syncTag')) {
+				updateSyncedDecorations(vscode.window.activeTextEditor);
+			}
+		}),
+	);
+
 	const disposable = vscode.commands.registerCommand('tinbot.todoSyncGithub', async () => {
 		const baseUri = baseUriOverride ?? context.extensionUri;
 		let items: Item[];
