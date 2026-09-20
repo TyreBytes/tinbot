@@ -4,3 +4,4 @@ out
 .vscode
 .vscode-test
 tasks.json
+*.secret
