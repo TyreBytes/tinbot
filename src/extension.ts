@@ -1,11 +1,27 @@
 import * as vscode from 'vscode';
 
-export async function readFirstTask(extensionUri: vscode.Uri): Promise<string> {
-	const fileUri = vscode.Uri.joinPath(extensionUri, 'task_list.todo');
+export interface Task {
+	name: string;
+	done: boolean;
+}
+
+export function parseTasks(text: string): Task[] {
+	return text
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.filter((line) => line.length > 0)
+		.map((line) => ({
+			done: line.startsWith('✔'),
+			name: line.replace(/^[☐✔]\s*/, '').trim(),
+		}))
+		.filter((task) => task.name.length > 0);
+}
+
+export async function readTasks(baseUri: vscode.Uri): Promise<Task[]> {
+	const fileUri = vscode.Uri.joinPath(baseUri, 'task_list.todo');
 	const bytes = await vscode.workspace.fs.readFile(fileUri);
 	const text = new TextDecoder('utf-8').decode(bytes);
-	const line = text.split(/\r?\n/).find((l) => l.trim().length > 0);
-	return line ? line.replace(/^[☐✔]\s*/, '').trim() : '';
+	return parseTasks(text);
 }
 
 let baseUriOverride: vscode.Uri | undefined;
@@ -18,10 +34,13 @@ export function __setTestBaseUri(uri: vscode.Uri | undefined): void {
 export function activate(context: vscode.ExtensionContext) {
 	const disposable = vscode.commands.registerCommand('tinbot.todoSyncGithub', async () => {
 		try {
-			const message = await readFirstTask(baseUriOverride ?? context.extensionUri);
-			vscode.window.showInformationMessage(message);
+			const baseUri = baseUriOverride ?? context.extensionUri;
+			const tasks = await readTasks(baseUri);
+			const outputUri = vscode.Uri.joinPath(baseUri, 'tasks.json');
+			const json = JSON.stringify(tasks, null, 2);
+			await vscode.workspace.fs.writeFile(outputUri, new TextEncoder().encode(json));
 		} catch (err) {
-			vscode.window.showErrorMessage(`tinbot: could not read task_list.todo: ${err}`);
+			vscode.window.showErrorMessage(`tinbot: could not sync tasks: ${err}`);
 		}
 	});
 
