@@ -2,3 +2,90 @@
 ☐ This is a first todo.
 ☐ This is a new example task to be done.
 
+☐ Another example task to get milk.
+	This is a description for the get milk example task.
+
+	Some addition information for that description.
+☐ Yet another task.
+	Chat did not help make this task.
+
+# Tin Bot Project:
+	Notes on the Tin Bot projects
+	3 month estimate
+
+	☐ Task specict to Tin Bot
+
+	## Alpha Stage:
+		November 14th - Finish Alpha Dev Stage, Feature Complete (20 days)
+
+		☐ Task specict to Tin Bot Alpha Stage
+		✔ Sign NDA @done(25-11-05 20:01)
+		☐ Race Result Screen
+			☐ sub task of race results screen.
+			✔ car icons @done(25-11-06 10:31)
+		☐ Vehicle Sound Refactoring
+		☐ Fix sound issue and merge crusher
+		☐ Create a Rushcremental title/logo
+		✔ Take a few 1080p screenshots for itch.io page @done(25-11-07 11:33)
+
+	# Pain Points of TurtleBrains:
+		☐ 2026-09-19: TurtleBrains Particle System has no editor.
+		✔ 2025-10-25: Make SetOrigin() in the tbGraphics::GraphicList public again. @done(20251025 06:55)
+			After a quick investigation this was disabled 10 years ago when the GraphicList was first created. Almost
+			certainly because we had no RecalculateWidthAndHeight() and had no way of knowing the size to set the origin
+			of. RecalculateWidthAndHeight() was added 3 years ago, and could be called during Add or RemoveGraphic.
+
+			The only real gotchya is the Developer will need to call SetOrigin() _again_ if they call Add or Remove
+			graphic since the BaseGraphic / graphic list doesn't hold the Anchor with an offset, but just the origin.
+		✔ 2025-10-02: GraphicList can't use SetOrigin() which caused pain when trying to position a ButtonEntity. @done(20251025 06:55)
+			The full parent tree looked like ButtonEntity is a Entity is a GraphicList ... is a Graphic. But the
+			SetOrigin() fails on GraphicList, I assume this was disabled before RecalculateWidthAndHeight() was
+			a function. Or perhaps past-Tim didn't want to call a potentially expensive function, or maybe another
+			reason I lost track of...
+		✘ 2025-10-23: tbGraphics::Camera doesn't have SetPosition(float, float) only Vector2 @cancelled(20260920 09:34)
+		✘ 2025-10-09: TurtleBrains Color doesn't have a way to SetAlpha or SetRed etc. @cancelled(20260920 09:34)
+			This seems a little odd that it requires setting ALL channels ALL the time.
+		✔ 2025-10-01: @hp2 @value5 SetRotation() and GetRotation() on Entity/Sprite/Graphics etc don't use tbMath::Angle @done(20251025 08:31)
+			This should begin using the tbMath::Angle since that doesn't care whether developer wants to work in degrees
+			or radians for a given function, it simply works.
+
+			It seems likely impossible, but it would be very nice to have this unit tested to spin clockwise. Perhaps the
+			unit test could send it to a RenderTarget and compare with a known png/image for likeness?
+
+			Changing GetRotation() would be an @api-break for TurtleBrains and I don't want to deal with the fallout
+			of project failing, especially since nightly builds on Windows isn't even setup. SetRotation() now has
+			a Angle overload, and there is a "helper function" GetAngle() that can be used in the meantime.
+
+		☐ 2025-10-14: TurtleBrains::Core::Diagnostics::CommandManager has no public "LogToConsole" api.
+			This is a huge oversight and for now I've just extern'd the implementation details as a work-around.
+
+			Currently the only available way to do it is implementation::CommandLog which takes a String or a
+			printf style const char*/... Ideally this would step away from the printf requirements, it is a bit
+			messier, especially when mixed with LogStream already existing... Also a log stream might be able
+			to dump to both DeveloperConsole and debug_log.txt at the same time.
+
+			Pro for the stream version is any operator<< overloading just works in all the places.
+
+			tb_debug_log(LogConsole() << "this goes to dev console AND debug_log.txt");
+			tbCore::Diagnostics::DeveloperConsole() << "blah blah";
+
+		✔ 2025-10-14: TurtleBrains::Core::Diagnostics::Commands have no built-in 'help' despite messaging. @done(20251025 16:01)
+			I was trying to figure out why `give` wasn't working as it did not display with `help` but finally
+			figured out that help is not actually displaying the possible commands like I thought it was. That
+			must have been done in the Who Let the Dog Out LudumDare code rather than/then inside TurtleBrains.
+
+			2025-10-25: Okay, so I think what happened was a few "BasicCommands" got lost or misplaced when
+			bringing the Console / CommandSystem into TurtleBrains. One of those commands was `help` and that
+			would explain why there is no... help displayed. Another basic command was `exit` which quit the
+			game.
+
+
+		✔ 2026-01-21: ImGui Editor doesn't accepet the : ; ' " characters @done(20260415 05:37)
+			✔ Also doesn't accept any SHIFT numbers !#$ becomes 134 @done(20260415 05:37)
+			✔ May want to check for more potential missing spots? @done(20260415 05:37)
+		☐ 2025-10-06: Adding a GetClosestMatchingString() string utility would be useful for some error messages.
+			I was attempting to ensure all UNLOCK_KEY's added to the TechTree csv file existed in some form to
+			prevent issues from typos. It would be neat to also have the messaging suggest "THIS_KEY" was a
+			close match.
+
+			This would probably fit in StringUtilities:: with a vector<string> and iterator begin/end option.
